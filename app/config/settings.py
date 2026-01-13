@@ -1,24 +1,23 @@
 from pydantic_settings import BaseSettings
-
+from sqlalchemy import create_engine
 
 class Settings(BaseSettings):
     # Database Configuration
-    db_host: str = "localhost"
-    db_port: int = 3306
-    db_user: str = "baas"
-    db_password: str = "baas"
-    db_name: str = "baas"
 
-    # API Keys
-    groq_api_key: str = ""
+    DATABASE_URL: str
+    DATABASE_AUTH_TOKEN: str
 
-    # Server Configuration
-    host: str = "0.0.0.0"
-    port: int = 8000
+    GROQ_API_KEY: str
 
     @property
     def db_url(self) -> str:
-        return f"mysql+mysqldb://{self.db_user}:{self.db_password}@{self.db_host}:{self.db_port}/{self.db_name}"
+        engine = create_engine(
+            f"sqlite+{self.DATABASE_URL}?secure=true",
+            connect_args={
+                "auth_token": self.DATABASE_AUTH_TOKEN,
+            },
+        )
+        return engine
 
     class Config:
         env_file = ".env"
