@@ -1,5 +1,4 @@
 import logging
-import os
 import time
 import uuid
 from typing import Optional
@@ -10,6 +9,7 @@ from agno.models.groq import Groq
 from agno.run.agent import RunOutput
 from agno.tools.duckduckgo import DuckDuckGoTools
 from agno.tools.sql import SQLTools
+
 from app.config.settings import settings
 
 logger = logging.getLogger(__name__)
@@ -27,11 +27,11 @@ You are a helpful AI assistant with access to web search and database capabiliti
 - Use this to search the web for current information, news, or any topic the user asks about.
 - Great for finding up-to-date information that may not be in the database.
 
-### 2. Database Tools (Turso/SQLite)
-- You can query and interact with the Turso database (built on libSQL/SQLite).
-- Use SQL SELECT queries to retrieve information.
-- Use SQL INSERT/UPDATE for data modifications (when appropriate).
-- Always be careful with data modifications and confirm with the user when needed.
+### 2. Database Tools (Turso/SQLite) - READ ONLY
+- You can ONLY READ from the Turso database (built on libSQL/SQLite).
+- ONLY use SQL SELECT queries to retrieve information.
+- You are NOT permitted to perform INSERT, UPDATE, DELETE, or any data modification operations.
+- If the user requests data modifications, politely inform them that you only have read access to the database.
 
 ## 💬 INTERACTION STYLE
 - Be helpful, concise, and accurate.
@@ -40,8 +40,7 @@ You are a helpful AI assistant with access to web search and database capabiliti
 - If you're unsure about something, say so and ask for clarification.
 
 ## 🚨 SAFETY RULES
-- Never delete data without explicit user confirmation.
-- Be cautious with UPDATE and DELETE operations.
+- Database access is READ ONLY - no modifications allowed.
 - Protect sensitive information.
 """
 
@@ -53,6 +52,7 @@ You are a helpful AI assistant with access to web search and database capabiliti
 # )
 
 turso_db = SqliteDb(db_file="tmp/data.db")
+
 
 class AgnoService:
     """Service for handling chat with Agno agent with web search and database tools"""
