@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 ENGINE = settings.db_url
 GROQ_API_KEY = settings.GROQ_API_KEY
 SYSTEM_PROMPT = """
-You are a helpful AI assistant with access to web search and database capabilities.
+You are a helpful AI assistant named Alex with access to web search and database capabilities.
 
 ## 🛠️ AVAILABLE TOOLS
 
@@ -34,6 +34,7 @@ You are a helpful AI assistant with access to web search and database capabiliti
 - If the user requests data modifications, politely inform them that you only have read access to the database.
 
 ## 💬 INTERACTION STYLE
+- Always check the database for information before using web search.
 - Be helpful, concise, and accurate.
 - When searching the web, summarize findings clearly.
 - When querying the database, present results in a readable format (tables when appropriate).
@@ -60,6 +61,12 @@ class AgnoService:
     def __init__(self):
         self.agent: Optional[Agent] = None
         self._initialized = False
+        self.ddg_tools = None
+
+    def _create_sql_tools(self):
+        """Create a fresh SQLTools instance to avoid connection expiration"""
+        logger.debug("Creating fresh SQLTools instance")
+        return SQLTools(db_engine=ENGINE)
 
     async def initialize(self):
         """Initialize the Agno agent with DuckDuckGo search and SQL tools"""
@@ -67,15 +74,20 @@ class AgnoService:
             return
 
         try:
-            # Initialize tools
-            ddg_tools = DuckDuckGoTools()
-            sql_tools = SQLTools(db_engine=ENGINE)
+            # Initialize DuckDuckGo tools once (these don't expire)
+            self.ddg_tools = DuckDuckGoTools(
+                backend='auto',  # Automatically select best backend (bing, yahoo, or duckduckgo)
+                timeout=20,  # Increased timeout for reliability
+                fixed_max_results=10,  # Limit results per query to avoid rate limiting
+            )
+            # Create fresh SQL tools instance for initial setup
+            sql_tools = self._create_sql_tools()
 
             # Create the agent with web search and database tools
             self.agent = Agent(
                 model=Groq(id="openai/gpt-oss-120b", api_key=GROQ_API_KEY),
-                markdown=True,
-                tools=[ddg_tools, sql_tools],
+                markdown=False,
+                tools=[self.ddg_tools, sql_tools],
                 system_message=SYSTEM_PROMPT,
                 db=turso_db,  # Use Turso (SQLite-compatible) for chat history
                 add_history_to_context=True,
@@ -117,6 +129,11 @@ class AgnoService:
             Dict containing response and session_id
         """
         await self.ensure_initialized()
+        
+        # Create fresh SQL tools for EVERY request to avoid Turso connection expiration
+        logger.debug("Creating fresh SQL tools for this request")
+        fresh_sql_tools = self._create_sql_tools()
+        self.agent.tools = [self.ddg_tools, fresh_sql_tools]
 
         # Generate session ID if not provided
         if not session_id:

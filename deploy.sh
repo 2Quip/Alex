@@ -15,7 +15,7 @@ start() {
         return 1
     fi
     echo "Starting server..."
-    nohup uvicorn app.main:app --host 0.0.0.0 --port 8000 > "$LOG_FILE" 2>&1 &
+    nohup uvicorn app.main:app --host 0.0.0.0 --port 8090 > "$LOG_FILE" 2>&1 &
     echo $! > "$PID_FILE"
     echo "Server started (PID: $(cat "$PID_FILE"))"
 }

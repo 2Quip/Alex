@@ -11,5 +11,5 @@ dependencies = [
     "groq>=1.0.0",
     "pydantic-settings>=2.12.0",
     "python-dotenv>=1.2.1",
-    "sqlalchemy-libsql>=1.2.0",
+    "sqlalchemy-libsql>=0.2.0",
 ]

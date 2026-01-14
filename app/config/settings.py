@@ -16,6 +16,8 @@ class Settings(BaseSettings):
             connect_args={
                 "auth_token": self.DATABASE_AUTH_TOKEN,
             },
+            pool_recycle=120,
+            pool_pre_ping=True
         )
         return engine
 

@@ -12,5 +12,10 @@ wheels/
 # Environment variables
 .env
 
+# Server 
+*.log
+server.pid
+
 # Others
 /tmp
+
