@@ -132,6 +132,31 @@ Content-Type: application/json
 }
 ```
 
+### Chat with Agent (Streaming)
+
+```bash
+POST /chat/stream
+Content-Type: application/json
+
+{
+  "message": "Search the web for latest AI news",
+  "session_id": "optional-session-id",
+  "user_id": "user123"
+}
+```
+
+**Response:** Server-Sent Events (SSE) stream
+
+```
+data: {"type": "session", "session_id": "abc-123-def-456"}
+
+data: {"type": "content", "content": "Here's what I found"}
+
+data: {"type": "content", "content": " about the latest AI news..."}
+
+data: {"type": "done", "execution_time": 2.345}
+```
+
 ## 💡 Usage Examples
 
 ### Web Search Example
@@ -167,6 +192,87 @@ curl -X POST http://localhost:8000/chat \
     "session_id": "session123",
     "user_id": "user1"
   }'
+```
+
+### Streaming Chat Example
+
+```bash
+curl -N -X POST http://localhost:8000/chat/stream \
+  -H "Content-Type: application/json" \
+  -d '{
+    "message": "What are the latest developments in AI?",
+    "user_id": "user1"
+  }'
+```
+
+**Using JavaScript/TypeScript:**
+
+```javascript
+// Using fetch API
+const response = await fetch("http://localhost:8000/chat/stream", {
+    method: "POST",
+    headers: {
+        "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+        message: "What are the latest developments in AI?",
+        user_id: "user1",
+    }),
+});
+
+const reader = response.body.getReader();
+const decoder = new TextDecoder();
+
+while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    const chunk = decoder.decode(value);
+    const lines = chunk.split("\n");
+
+    for (const line of lines) {
+        if (line.startsWith("data: ")) {
+            const data = JSON.parse(line.slice(6));
+
+            if (data.type === "session") {
+                console.log("Session ID:", data.session_id);
+            } else if (data.type === "content") {
+                process.stdout.write(data.content);
+            } else if (data.type === "done") {
+                console.log("\nCompleted in", data.execution_time, "seconds");
+            }
+        }
+    }
+}
+```
+
+**Using Python:**
+
+```python
+import requests
+import json
+
+response = requests.post(
+    'http://localhost:8000/chat/stream',
+    json={
+        'message': 'What are the latest developments in AI?',
+        'user_id': 'user1'
+    },
+    stream=True
+)
+
+for line in response.iter_lines():
+    if line:
+        line = line.decode('utf-8')
+        if line.startswith('data: '):
+            data = json.loads(line[6:])
+
+            if data['type'] == 'session':
+                print(f"Session ID: {data['session_id']}")
+            elif data['type'] == 'content':
+                print(data['content'], end='', flush=True)
+            elif data['type'] == 'done':
+                print(f"\nCompleted in {data['execution_time']} seconds")
 ```
 
 ## 🏗️ Project Structure

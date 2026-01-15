@@ -386,6 +386,67 @@ class AgnoService:
             logger.error(f"Agno chat error: {str(e)}")
             raise
 
+    async def chat_stream(
+        self,
+        message: str,
+        session_id: Optional[str] = None,
+        user_id: str = "default",
+    ):
+        """
+        Process a chat message using the Agno agent with streaming response.
+
+        Args:
+            message: The user's message
+            session_id: Optional session ID for conversation continuity
+            user_id: User ID for the session
+
+        Yields:
+            Server-Sent Events formatted chunks of the response
+        """
+        import json
+
+        await self.ensure_initialized()
+
+        # Create fresh SQL tools for EVERY request to avoid Turso connection expiration
+        logger.debug("Creating fresh SQL tools for this streaming request")
+        fresh_sql_tools = self._create_sql_tools()
+        self.agent.tools = [self.ddg_tools, fresh_sql_tools]
+
+        # Generate session ID if not provided
+        if not session_id:
+            session_id = str(uuid.uuid4())
+
+        try:
+            # Send session ID first
+            yield f"data: {json.dumps({'type': 'session', 'session_id': session_id})}\n\n"
+
+            # Run the agent with streaming
+            start_time = time.time()
+            response_stream = self.agent.arun(
+                input=message,
+                session_id=session_id,
+                user_id=user_id,
+                stream=True,
+            )
+
+            # Stream the response chunks
+            async for chunk in response_stream:
+                if chunk.content:
+                    yield f"data: {json.dumps({'type': 'content', 'content': chunk.content})}\n\n"
+
+            execution_time = time.time() - start_time
+            logger.info(
+                f"Streaming response completed for session {session_id} "
+                f"in {round(execution_time, 3)}s"
+            )
+
+            # Send completion event
+            yield f"data: {json.dumps({'type': 'done', 'execution_time': round(execution_time, 3)})}\n\n"
+
+        except Exception as e:
+            logger.error(f"Agno streaming chat error: {str(e)}")
+            yield f"data: {json.dumps({'type': 'error', 'error': str(e)})}\n\n"
+
 
 # Singleton instance
 agno_service = AgnoService()
