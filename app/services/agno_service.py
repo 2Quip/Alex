@@ -3,10 +3,18 @@ import time
 import uuid
 from typing import Optional
 
-from agno.agent import Agent
+from agno.agent import (
+    Agent,
+    RunCompletedEvent,
+    RunContentEvent,
+    RunErrorEvent,
+    RunStartedEvent,
+    ToolCallCompletedEvent,
+    ToolCallStartedEvent,
+)
 from agno.db.sqlite import SqliteDb
 from agno.models.groq import Groq
-from agno.run.agent import RunOutput
+from agno.run.agent import RunContentCompletedEvent, RunOutput
 from agno.tools.duckduckgo import DuckDuckGoTools
 from agno.tools.sql import SQLTools
 
@@ -402,6 +410,13 @@ class AgnoService:
 
         Yields:
             Server-Sent Events formatted chunks of the response
+            Event types:
+            - session: Initial session ID
+            - tool_start: Tool execution started
+            - tool_complete: Tool execution completed
+            - content: Response content chunks
+            - done: Completion event
+            - error: Error event
         """
         import json
 
@@ -416,6 +431,15 @@ class AgnoService:
         if not session_id:
             session_id = str(uuid.uuid4())
 
+        # Map tool names to user-friendly actions
+        tool_action_map = {
+            "duckduckgo_search": {"icon": "🔍", "action": "Searching the web"},
+            "duckduckgo_news": {"icon": "📰", "action": "Searching news"},
+            "run_sql_query": {"icon": "💾", "action": "Querying database"},
+            "describe_table": {"icon": "📋", "action": "Checking table structure"},
+            "list_tables": {"icon": "📋", "action": "Listing database tables"},
+        }
+
         try:
             # Send session ID first
             yield f"data: {json.dumps({'type': 'session', 'session_id': session_id})}\n\n"
@@ -427,12 +451,65 @@ class AgnoService:
                 session_id=session_id,
                 user_id=user_id,
                 stream=True,
+                stream_events=True,
             )
 
-            # Stream the response chunks
+            # Stream the response chunks using proper Agno event types
             async for chunk in response_stream:
-                if chunk.content:
-                    yield f"data: {json.dumps({'type': 'content', 'content': chunk.content})}\n\n"
+                chunk_type = type(chunk).__name__
+
+                if isinstance(chunk, RunStartedEvent):
+                    # Run started - agent is beginning to process
+                    logger.debug("Agent run started")
+
+                elif isinstance(chunk, ToolCallStartedEvent):
+                    # Tool execution started
+                    tool_name = chunk.tool.tool_name
+                    tool_args = chunk.tool.tool_args
+                    tool_info = tool_action_map.get(
+                        tool_name, {"icon": "🔧", "action": f"Using {tool_name}"}
+                    )
+                    logger.info(f"Tool started: {tool_name}")
+                    yield f"data: {json.dumps({'type': 'tool_start', 'tool': tool_name, 'icon': tool_info['icon'], 'action': tool_info['action'], 'args': str(tool_args)[:200]})}\n\n"
+
+                elif isinstance(chunk, ToolCallCompletedEvent):
+                    # Tool execution completed
+                    tool_name = chunk.tool.tool_name
+                    tool_info = tool_action_map.get(
+                        tool_name, {"icon": "✅", "action": f"Completed {tool_name}"}
+                    )
+                    # Truncate result for display
+                    result_preview = (
+                        str(chunk.tool.result)[:500] if chunk.tool.result else ""
+                    )
+                    logger.info(f"Tool completed: {tool_name}")
+                    yield f"data: {json.dumps({'type': 'tool_complete', 'tool': tool_name, 'icon': '✅', 'action': f'{tool_info["action"]} completed', 'result_preview': result_preview})}\n\n"
+
+                elif isinstance(chunk, RunContentEvent):
+                    # Content chunk
+                    if chunk.content:
+                        yield f"data: {json.dumps({'type': 'content', 'content': chunk.content})}\n\n"
+
+                elif isinstance(chunk, RunContentCompletedEvent):
+                    # Content completed - no action needed
+                    pass
+
+                elif isinstance(chunk, RunCompletedEvent):
+                    # Run completed
+                    logger.debug("Agent run completed event received")
+
+                elif isinstance(chunk, RunErrorEvent):
+                    # Error occurred during run
+                    error_msg = getattr(chunk, "error", "Unknown error")
+                    logger.error(f"Agent run error: {error_msg}")
+                    yield f"data: {json.dumps({'type': 'error', 'error': str(error_msg)})}\n\n"
+
+                elif isinstance(chunk, RunOutput):
+                    # Final run output - extract content if not already streamed
+                    logger.debug("Received RunOutput")
+                else:
+                    # Log unknown event types for debugging
+                    logger.debug(f"Unhandled chunk type: {chunk_type}")
 
             execution_time = time.time() - start_time
             logger.info(
@@ -444,7 +521,10 @@ class AgnoService:
             yield f"data: {json.dumps({'type': 'done', 'execution_time': round(execution_time, 3)})}\n\n"
 
         except Exception as e:
-            logger.error(f"Agno streaming chat error: {str(e)}")
+            import traceback
+
+            error_traceback = traceback.format_exc()
+            logger.error(f"Agno streaming chat error: {str(e)}\n{error_traceback}")
             yield f"data: {json.dumps({'type': 'error', 'error': str(e)})}\n\n"
 
 

@@ -1,0 +1,471 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>Agno Agent Streaming Test</title>
+        <style>
+            * {
+                margin: 0;
+                padding: 0;
+                box-sizing: border-box;
+            }
+
+            body {
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI",
+                    Roboto, Oxygen, Ubuntu, sans-serif;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                min-height: 100vh;
+                padding: 20px;
+                display: flex;
+                justify-content: center;
+                align-items: center;
+            }
+
+            .container {
+                background: white;
+                border-radius: 16px;
+                box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+                max-width: 800px;
+                width: 100%;
+                padding: 30px;
+            }
+
+            h1 {
+                color: #333;
+                margin-bottom: 10px;
+                font-size: 28px;
+            }
+
+            .subtitle {
+                color: #666;
+                margin-bottom: 30px;
+                font-size: 14px;
+            }
+
+            .input-group {
+                margin-bottom: 20px;
+            }
+
+            label {
+                display: block;
+                margin-bottom: 8px;
+                color: #555;
+                font-weight: 600;
+                font-size: 14px;
+            }
+
+            input,
+            textarea {
+                width: 100%;
+                padding: 12px;
+                border: 2px solid #e0e0e0;
+                border-radius: 8px;
+                font-size: 14px;
+                font-family: inherit;
+                transition: border-color 0.3s;
+            }
+
+            input:focus,
+            textarea:focus {
+                outline: none;
+                border-color: #667eea;
+            }
+
+            textarea {
+                resize: vertical;
+                min-height: 100px;
+            }
+
+            .button-group {
+                display: flex;
+                gap: 10px;
+                margin-bottom: 20px;
+            }
+
+            button {
+                padding: 12px 24px;
+                border: none;
+                border-radius: 8px;
+                font-size: 14px;
+                font-weight: 600;
+                cursor: pointer;
+                transition: all 0.3s;
+                flex: 1;
+            }
+
+            .btn-primary {
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                color: white;
+            }
+
+            .btn-primary:hover:not(:disabled) {
+                transform: translateY(-2px);
+                box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+            }
+
+            .btn-secondary {
+                background: #f5f5f5;
+                color: #666;
+            }
+
+            .btn-secondary:hover:not(:disabled) {
+                background: #e0e0e0;
+            }
+
+            button:disabled {
+                opacity: 0.5;
+                cursor: not-allowed;
+            }
+
+            .response-area {
+                background: #f9f9f9;
+                border: 2px solid #e0e0e0;
+                border-radius: 8px;
+                padding: 20px;
+                min-height: 200px;
+                max-height: 400px;
+                overflow-y: auto;
+                font-size: 14px;
+                line-height: 1.6;
+                color: #333;
+                white-space: pre-wrap;
+                word-wrap: break-word;
+            }
+
+            .response-area.streaming {
+                border-color: #667eea;
+                background: #f0f4ff;
+            }
+
+            .info-box {
+                background: #e3f2fd;
+                border-left: 4px solid #2196f3;
+                padding: 12px;
+                margin-bottom: 20px;
+                border-radius: 4px;
+                font-size: 13px;
+                color: #555;
+            }
+
+            .status {
+                margin-top: 10px;
+                padding: 8px 12px;
+                border-radius: 6px;
+                font-size: 13px;
+                font-weight: 500;
+            }
+
+            .status.success {
+                background: #e8f5e9;
+                color: #2e7d32;
+            }
+
+            .status.error {
+                background: #ffebee;
+                color: #c62828;
+            }
+
+            .status.info {
+                background: #e3f2fd;
+                color: #1565c0;
+            }
+
+            .status.tool-status {
+                background: #fff3e0;
+                color: #e65100;
+                border-left: 3px solid #ff9800;
+            }
+
+            .status.tool-complete {
+                background: #e8f5e9;
+                color: #2e7d32;
+                border-left: 3px solid #4caf50;
+            }
+
+            .loading {
+                display: inline-block;
+                width: 12px;
+                height: 12px;
+                border: 2px solid #667eea;
+                border-radius: 50%;
+                border-top-color: transparent;
+                animation: spin 0.8s linear infinite;
+                margin-right: 8px;
+            }
+
+            @keyframes spin {
+                to {
+                    transform: rotate(360deg);
+                }
+            }
+
+            .session-info {
+                font-size: 12px;
+                color: #888;
+                margin-top: 10px;
+                font-family: monospace;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <h1>🤖 Agno Agent Streaming Test</h1>
+            <p class="subtitle">
+                Test the streaming chat endpoint with real-time responses
+            </p>
+
+            <div class="info-box">
+                <strong>ℹ️ Info:</strong> This page connects to
+                <code>http://localhost:8000/chat/stream</code>. Make sure your
+                API server is running.
+            </div>
+
+            <div class="input-group">
+                <label for="apiUrl">API URL:</label>
+                <input
+                    type="text"
+                    id="apiUrl"
+                    value="http://localhost:8000"
+                    placeholder="http://localhost:8000"
+                />
+            </div>
+
+            <div class="input-group">
+                <label for="userId">User ID:</label>
+                <input
+                    type="text"
+                    id="userId"
+                    value="test-user"
+                    placeholder="Enter user ID"
+                />
+            </div>
+
+            <div class="input-group">
+                <label for="message">Message:</label>
+                <textarea id="message" placeholder="Type your message here...">
+What are the latest developments in AI?</textarea
+                >
+            </div>
+
+            <div class="button-group">
+                <button
+                    class="btn-primary"
+                    id="sendBtn"
+                    onclick="sendMessage()"
+                >
+                    Send Message
+                </button>
+                <button
+                    class="btn-secondary"
+                    id="clearBtn"
+                    onclick="clearResponse()"
+                >
+                    Clear Response
+                </button>
+            </div>
+
+            <div class="response-area" id="responseArea">
+                Response will appear here...
+            </div>
+
+            <div id="statusArea"></div>
+            <div class="session-info" id="sessionInfo"></div>
+        </div>
+
+        <script>
+            let currentController = null;
+            let currentSessionId = null;
+
+            async function sendMessage() {
+                const apiUrl = document.getElementById("apiUrl").value;
+                const userId = document.getElementById("userId").value;
+                const message = document.getElementById("message").value;
+                const responseArea = document.getElementById("responseArea");
+                const statusArea = document.getElementById("statusArea");
+                const sessionInfo = document.getElementById("sessionInfo");
+                const sendBtn = document.getElementById("sendBtn");
+
+                if (!message.trim()) {
+                    showStatus("Please enter a message", "error");
+                    return;
+                }
+
+                // Cancel any existing request
+                if (currentController) {
+                    currentController.abort();
+                }
+
+                // Create new abort controller
+                currentController = new AbortController();
+
+                // Clear previous response
+                responseArea.textContent = "";
+                responseArea.classList.add("streaming");
+                statusArea.innerHTML = "";
+
+                // Disable send button
+                sendBtn.disabled = true;
+                sendBtn.innerHTML =
+                    '<span class="loading"></span> Streaming...';
+
+                const startTime = Date.now();
+
+                try {
+                    const response = await fetch(`${apiUrl}/chat/stream`, {
+                        method: "POST",
+                        headers: {
+                            "Content-Type": "application/json",
+                        },
+                        body: JSON.stringify({
+                            message: message,
+                            session_id: currentSessionId,
+                            user_id: userId,
+                        }),
+                        signal: currentController.signal,
+                    });
+
+                    if (!response.ok) {
+                        throw new Error(
+                            `HTTP error! status: ${response.status}`
+                        );
+                    }
+
+                    const reader = response.body.getReader();
+                    const decoder = new TextDecoder();
+                    let buffer = ""; // Buffer to handle partial chunks
+
+                    console.log("Starting to read stream...");
+
+                    while (true) {
+                        const { done, value } = await reader.read();
+                        if (done) {
+                            console.log("Stream done");
+                            break;
+                        }
+
+                        // Append new data to buffer
+                        const chunk = decoder.decode(value, { stream: true });
+                        console.log(
+                            "Raw chunk received:",
+                            chunk.substring(0, 100)
+                        );
+                        buffer += chunk;
+
+                        // Process complete lines from the buffer
+                        const lines = buffer.split("\n");
+                        // Keep the last incomplete line in the buffer
+                        buffer = lines.pop() || "";
+
+                        console.log(
+                            `Processing ${lines.length} lines, buffer has ${buffer.length} chars`
+                        );
+
+                        for (const line of lines) {
+                            if (line.trim() === "") continue; // Skip empty lines
+
+                            console.log(
+                                "Processing line:",
+                                line.substring(0, 100)
+                            );
+
+                            if (line.startsWith("data: ")) {
+                                try {
+                                    const jsonStr = line.slice(6);
+                                    console.log(
+                                        "Parsing JSON:",
+                                        jsonStr.substring(0, 100)
+                                    );
+                                    const data = JSON.parse(jsonStr);
+                                    console.log("Received event:", data);
+
+                                    if (data.type === "session") {
+                                        currentSessionId = data.session_id;
+                                        sessionInfo.textContent = `Session ID: ${data.session_id}`;
+                                        showStatus(
+                                            "🤖 Connected! Agent is thinking...",
+                                            "info"
+                                        );
+                                    } else if (data.type === "tool_start") {
+                                        // Tool execution started
+                                        showStatus(
+                                            `${data.icon} ${data.action}...`,
+                                            "tool-status"
+                                        );
+                                    } else if (data.type === "tool_complete") {
+                                        // Tool execution completed
+                                        showStatus(
+                                            `${data.icon} ${data.action}`,
+                                            "tool-complete"
+                                        );
+                                    } else if (data.type === "content") {
+                                        responseArea.textContent +=
+                                            data.content;
+                                        // Auto-scroll to bottom
+                                        responseArea.scrollTop =
+                                            responseArea.scrollHeight;
+                                    } else if (data.type === "done") {
+                                        const duration =
+                                            (Date.now() - startTime) / 1000;
+                                        showStatus(
+                                            `✓ Completed in ${duration.toFixed(
+                                                2
+                                            )}s (Server: ${
+                                                data.execution_time
+                                            }s)`,
+                                            "success"
+                                        );
+                                        responseArea.classList.remove(
+                                            "streaming"
+                                        );
+                                    } else if (data.type === "error") {
+                                        throw new Error(data.error);
+                                    }
+                                } catch (parseError) {
+                                    console.error("Parse error:", parseError);
+                                }
+                            }
+                        }
+                    }
+                } catch (error) {
+                    if (error.name === "AbortError") {
+                        showStatus("Request cancelled", "info");
+                    } else {
+                        console.error("Error:", error);
+                        showStatus(`Error: ${error.message}`, "error");
+                        responseArea.textContent = `Error: ${error.message}`;
+                    }
+                    responseArea.classList.remove("streaming");
+                } finally {
+                    sendBtn.disabled = false;
+                    sendBtn.textContent = "Send Message";
+                    currentController = null;
+                }
+            }
+
+            function clearResponse() {
+                document.getElementById("responseArea").textContent =
+                    "Response will appear here...";
+                document
+                    .getElementById("responseArea")
+                    .classList.remove("streaming");
+                document.getElementById("statusArea").innerHTML = "";
+            }
+
+            function showStatus(message, type = "info") {
+                const statusArea = document.getElementById("statusArea");
+                statusArea.innerHTML = `<div class="status ${type}">${message}</div>`;
+            }
+
+            // Allow Enter key to send (Shift+Enter for new line)
+            document
+                .getElementById("message")
+                .addEventListener("keydown", function (e) {
+                    if (e.key === "Enter" && !e.shiftKey) {
+                        e.preventDefault();
+                        sendMessage();
+                    }
+                });
+        </script>
+    </body>
+</html>
