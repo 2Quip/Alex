@@ -8,6 +8,7 @@ class Settings(BaseSettings):
     DATABASE_AUTH_TOKEN: str
 
     GROQ_API_KEY: str
+    OPENROUTER_API_KEY: str
 
     @property
     def db_url(self) -> str:
