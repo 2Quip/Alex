@@ -8,6 +8,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from app.services.agno_service import agno_service
+from app.services.diagnostics_service import diagnostics_service
 
 # Configure logging
 
@@ -32,19 +33,35 @@ class ChatResponse(BaseModel):
     session_id: str
 
 
+class DiagnosticsRequest(BaseModel):
+    message: str
+    listing_id: str
+    session_id: Optional[str] = None
+    user_id: str = "default"
+
+
+class DiagnosticsResponse(BaseModel):
+    diagnostics: list[str]
+    listing_id: str
+    session_id: str
+    execution_time: float
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifespan context manager for startup and shutdown events"""
     # Startup
     logger.info("Starting up Agno Agent API...")
     await agno_service.initialize()
-    logger.info("Agno Agent initialized successfully")
+    await diagnostics_service.initialize()
+    logger.info("Agno Agent and Diagnostics services initialized successfully")
 
     yield
 
     # Shutdown
     logger.info("Shutting down Agno Agent API...")
     await agno_service.cleanup()
+    await diagnostics_service.cleanup()
     logger.info("Cleanup complete")
 
 
@@ -130,6 +147,37 @@ async def chat_stream(request: ChatRequest):
         )
     except Exception as e:
         logger.error(f"Chat stream error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/diagnostics", response_model=DiagnosticsResponse)
+async def diagnostics(request: DiagnosticsRequest):
+    """
+    Get equipment diagnostics based on issue description and listing ID.
+
+    The diagnostics agent analyzes the issue and provides up to 5 potential
+    diagnoses by:
+    - Querying the listing table for equipment information
+    - Using web search for similar issues and common failure modes
+    - Analyzing historical data if available
+
+    Returns structured diagnostics with session tracking.
+    """
+    try:
+        result = await diagnostics_service.diagnose(
+            message=request.message,
+            listing_id=request.listing_id,
+            session_id=request.session_id,
+            user_id=request.user_id,
+        )
+        return DiagnosticsResponse(
+            diagnostics=result["diagnostics"],
+            listing_id=result["listing_id"],
+            session_id=result["session_id"],
+            execution_time=result["execution_time"],
+        )
+    except Exception as e:
+        logger.error(f"Diagnostics error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
