@@ -1,7 +1,7 @@
 import logging
 import time
 import uuid
-from typing import List, Optional
+from typing import List, Optional, Dict, Any, Callable
 
 from agno.agent import Agent
 from agno.db.sqlite import SqliteDb
@@ -38,7 +38,29 @@ class DiagnosticsOutput(BaseModel):
     """Structured output for diagnostics"""
     diagnostics: List[str] = Field(..., max_length=5, description="List of potential diagnoses (max 5)")
 
+def log_sql_call(function_name: str, function_call, arguments):
+    logger.info(f"SQL Tool: {function_name}")
+    logger.info(f"Arguments: {arguments}")
+    result = function_call(**arguments)
+    logger.info(f"Result: {result}")
+    return result
 
+def logger_hook(
+    function_name: str, function_call: Callable, arguments: Dict[str, Any]
+):
+    """Log the duration of the function call"""
+    start_time = time.time()
+
+    # Call the function
+    result = function_call(**arguments)
+
+    end_time = time.time()
+    duration = end_time - start_time
+
+    logger.info(f"Function {function_name} took {duration:.2f} seconds to execute")
+
+    # Return the result
+    return result
 class DiagnosticsService:
     """Service for handling equipment diagnostics with structured output"""
 
@@ -79,6 +101,7 @@ class DiagnosticsService:
                 add_history_to_context=True,
                 num_history_runs=3,  # Keep fewer history for focused diagnostics
                 output_schema=DiagnosticsOutput,  # Enable structured output
+                tool_hooks=[logger_hook],
             )
             
             self._initialized = True

@@ -11,7 +11,7 @@ class Settings(BaseSettings):
     OPENROUTER_API_KEY: str
 
     @property
-    def db_url(self) -> str:
+    def db_engine(self) -> str:
         engine = create_engine(
             f"sqlite+{self.DATABASE_URL}?secure=true",
             connect_args={

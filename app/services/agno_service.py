@@ -1,7 +1,7 @@
 import logging
 import time
 import uuid
-from typing import Optional
+from typing import Optional, Callable, Dict, Any
 
 from agno.agent import (
     Agent,
@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 # Turso Database configuration (Turso is built on libSQL/SQLite)
 # System prompt for the agent
-ENGINE = settings.db_url
+ENGINE = settings.db_engine
 GROQ_API_KEY = settings.GROQ_API_KEY
 SYSTEM_PROMPT = """
 You are Alex, an AI service agent specialized in work order and repair services. You assist technicians with troubleshooting and support managers with operational analysis.
@@ -127,6 +127,30 @@ You are Alex - efficient, knowledgeable, and always focused on helping users get
 
 turso_db = SqliteDb(db_file="tmp/data.db")
 
+def log_sql_call(function_name: str, function_call, arguments):
+    logger.info(f"SQL Tool: {function_name}")
+    logger.info(f"Arguments: {arguments}")
+    result = function_call(**arguments)
+    logger.info(f"Result: {result}")
+    return result
+
+def logger_hook(
+    function_name: str, function_call: Callable, arguments: Dict[str, Any]
+):
+    """Log the duration of the function call"""
+    start_time = time.time()
+
+    # Call the function
+    result = function_call(**arguments)
+
+    end_time = time.time()
+    duration = end_time - start_time
+    logger.info(f"Function {function_name} had these arguments: {arguments}")
+    logger.info(f"Function {function_name} took {duration:.2f} seconds to execute")
+    logger.info(f"Function {function_name} returned: {result}")
+
+    # Return the result
+    return result
 
 class AgnoService:
     """Service for handling chat with Agno agent with web search and database tools"""
@@ -165,6 +189,7 @@ class AgnoService:
                 db=turso_db,  # Use Turso (SQLite-compatible) for chat history
                 add_history_to_context=True,
                 num_history_runs=5,
+                tool_hooks=[logger_hook],
             )
             self._initialized = True
             logger.info(
