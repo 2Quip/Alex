@@ -127,13 +127,6 @@ You are Alex - efficient, knowledgeable, and always focused on helping users get
 
 turso_db = SqliteDb(db_file="tmp/data.db")
 
-def log_sql_call(function_name: str, function_call, arguments):
-    logger.info(f"SQL Tool: {function_name}")
-    logger.info(f"Arguments: {arguments}")
-    result = function_call(**arguments)
-    logger.info(f"Result: {result}")
-    return result
-
 def logger_hook(
     function_name: str, function_call: Callable, arguments: Dict[str, Any]
 ):

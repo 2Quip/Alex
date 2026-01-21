@@ -38,13 +38,6 @@ class DiagnosticsOutput(BaseModel):
     """Structured output for diagnostics"""
     diagnostics: List[str] = Field(..., max_length=5, description="List of potential diagnoses (max 5)")
 
-def log_sql_call(function_name: str, function_call, arguments):
-    logger.info(f"SQL Tool: {function_name}")
-    logger.info(f"Arguments: {arguments}")
-    result = function_call(**arguments)
-    logger.info(f"Result: {result}")
-    return result
-
 def logger_hook(
     function_name: str, function_call: Callable, arguments: Dict[str, Any]
 ):
@@ -61,6 +54,7 @@ def logger_hook(
 
     # Return the result
     return result
+
 class DiagnosticsService:
     """Service for handling equipment diagnostics with structured output"""
 
