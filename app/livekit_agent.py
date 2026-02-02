@@ -27,6 +27,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from agno.agent import Agent as AgnoAgent
 from agno.db.sqlite import SqliteDb
 from agno.models.openai import OpenAIChat
+from agno.models.openrouter import OpenRouter
+from agno.db.sqlite import SqliteDb
 from agno.tools.duckduckgo import DuckDuckGoTools
 from agno.tools.sql import SQLTools
 from dotenv import load_dotenv
@@ -89,9 +91,8 @@ Remember: Your responses will be spoken aloud, so be natural and conversational!
 # =============================================================================
 
 ENGINE = settings.db_engine
-OPENAI_API_KEY = settings.OPENAI_API_KEY
-
-# SQLite DB for session persistence
+OPENROUTER_API_KEY = settings.OPENROUTER_API_KEY
+# SQLite DB for session persistence - disabled due to pickle errors with LiveKit
 turso_db = SqliteDb(db_file="tmp/livekit_sessions.db")
 
 
@@ -104,22 +105,21 @@ def create_agno_agent(session_id: str | None = None) -> AgnoAgent:
     """Create and configure the Agno agent with tools for voice interaction."""
     
     # Initialize tools
-    ddg_tools = DuckDuckGoTools(
-        backend="auto",
-        timeout=20,
-        fixed_max_results=5,  # Reduced for faster voice responses
-    )
+    ddg_tools = DuckDuckGoTools()
     sql_tools = create_sql_tools()
     
+    # Create agent without db persistence to avoid pickle errors
+    # LiveKit's AgentSession maintains the conversation context instead
     agent = AgnoAgent(
-        model=OpenAIChat(id="gpt-4o-mini", api_key=OPENAI_API_KEY),
+        model=OpenRouter(id="openai/gpt-oss-120b", api_key=OPENROUTER_API_KEY),
         tools=[ddg_tools, sql_tools],
         instructions=VOICE_SYSTEM_PROMPT,
         markdown=False,  # No markdown for voice
         add_datetime_to_context=True,
+        # Session persistence disabled - causes pickle errors with coroutines
         db=turso_db,
         add_history_to_context=True,
-        num_history_runs=3,  # Keep recent context for voice continuity
+        num_history_runs=3,
     )
     
     return agent
@@ -152,14 +152,15 @@ async def voice_agent(ctx: JobContext):
     
     logger.info(f"Voice agent starting for room: {ctx.room.name}")
     
+    # Get the room SID (it's a coroutine property, so we need to await it)
+    
     # Create the Agno agent with room-specific session
-    agno_agent = create_agno_agent(session_id=ctx.room.sid)
+    agno_agent = create_agno_agent()
     
     # Wrap the Agno agent for LiveKit
     livekit_llm = LLMAdapter(
         agent=agno_agent,
-        session_id=ctx.room.sid,
-        user_id=ctx.room.name,
+        session_id=ctx.room.name,
     )
     
     # Create the voice pipeline session
