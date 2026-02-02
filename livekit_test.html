@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>2Quip Voice Agent - LiveKit Test</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            color: #fff;
+        }
+
+        .container {
+            text-align: center;
+            padding: 40px;
+            max-width: 600px;
+        }
+
+        h1 {
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+            background: linear-gradient(90deg, #00d2ff, #3a7bd5);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .subtitle {
+            color: #8892b0;
+            margin-bottom: 40px;
+            font-size: 1.1rem;
+        }
+
+        .status {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 15px 30px;
+            border-radius: 10px;
+            margin-bottom: 30px;
+            display: inline-block;
+        }
+
+        .status-indicator {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 10px;
+            animation: pulse 2s infinite;
+        }
+
+        .status-indicator.disconnected {
+            background: #ff6b6b;
+        }
+
+        .status-indicator.connecting {
+            background: #ffd93d;
+        }
+
+        .status-indicator.connected {
+            background: #6bcb77;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .call-button {
+            width: 120px;
+            height: 120px;
+            border-radius: 50%;
+            border: none;
+            cursor: pointer;
+            font-size: 40px;
+            transition: all 0.3s ease;
+            margin-bottom: 20px;
+        }
+
+        .call-button.start {
+            background: linear-gradient(135deg, #6bcb77, #4caf50);
+            box-shadow: 0 10px 30px rgba(107, 203, 119, 0.4);
+        }
+
+        .call-button.start:hover {
+            transform: scale(1.05);
+            box-shadow: 0 15px 40px rgba(107, 203, 119, 0.5);
+        }
+
+        .call-button.end {
+            background: linear-gradient(135deg, #ff6b6b, #ee5a5a);
+            box-shadow: 0 10px 30px rgba(255, 107, 107, 0.4);
+        }
+
+        .call-button.end:hover {
+            transform: scale(1.05);
+            box-shadow: 0 15px 40px rgba(255, 107, 107, 0.5);
+        }
+
+        .call-button:disabled {
+            background: #555;
+            cursor: not-allowed;
+            box-shadow: none;
+        }
+
+        .instructions {
+            background: rgba(255, 255, 255, 0.05);
+            padding: 20px;
+            border-radius: 10px;
+            text-align: left;
+            margin-top: 30px;
+        }
+
+        .instructions h3 {
+            margin-bottom: 15px;
+            color: #00d2ff;
+        }
+
+        .instructions ol {
+            padding-left: 20px;
+            color: #8892b0;
+            line-height: 1.8;
+        }
+
+        .instructions code {
+            background: rgba(0, 210, 255, 0.1);
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-family: monospace;
+            color: #00d2ff;
+        }
+
+        .visualizer {
+            display: flex;
+            justify-content: center;
+            align-items: flex-end;
+            height: 60px;
+            gap: 4px;
+            margin: 20px 0;
+        }
+
+        .visualizer-bar {
+            width: 6px;
+            background: linear-gradient(180deg, #00d2ff, #3a7bd5);
+            border-radius: 3px;
+            transition: height 0.1s ease;
+        }
+
+        .form-group {
+            margin-bottom: 15px;
+            text-align: left;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            color: #8892b0;
+        }
+
+        .form-group input {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #333;
+            border-radius: 5px;
+            background: rgba(255, 255, 255, 0.1);
+            color: #fff;
+            font-size: 14px;
+        }
+
+        .form-group input::placeholder {
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎙️ 2Quip Voice Agent</h1>
+        <p class="subtitle">AI-Powered Voice Assistant with Agno + LiveKit</p>
+
+        <div class="status">
+            <span class="status-indicator disconnected" id="statusIndicator"></span>
+            <span id="statusText">Disconnected</span>
+        </div>
+
+        <div class="visualizer" id="visualizer" style="display: none;">
+            <div class="visualizer-bar" style="height: 20px;"></div>
+            <div class="visualizer-bar" style="height: 35px;"></div>
+            <div class="visualizer-bar" style="height: 25px;"></div>
+            <div class="visualizer-bar" style="height: 45px;"></div>
+            <div class="visualizer-bar" style="height: 30px;"></div>
+            <div class="visualizer-bar" style="height: 40px;"></div>
+            <div class="visualizer-bar" style="height: 22px;"></div>
+        </div>
+
+        <button class="call-button start" id="callButton" onclick="toggleCall()">
+            📞
+        </button>
+
+        <p id="callStatus" style="color: #8892b0; margin-bottom: 20px;">Click to start voice call</p>
+
+        <div class="instructions">
+            <h3>🚀 Quick Setup</h3>
+            <ol>
+                <li>Start your LiveKit agent: <code>python livekit_agent.py dev</code></li>
+                <li>Get a room token from your LiveKit dashboard or backend</li>
+                <li>Enter your LiveKit URL and token below</li>
+                <li>Click the call button to connect!</li>
+            </ol>
+            
+            <div style="margin-top: 20px;">
+                <div class="form-group">
+                    <label for="livekitUrl">LiveKit Server URL:</label>
+                    <input type="text" id="livekitUrl" placeholder="wss://your-project.livekit.cloud">
+                </div>
+                <div class="form-group">
+                    <label for="roomToken">Room Token:</label>
+                    <input type="text" id="roomToken" placeholder="Your participant token">
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- LiveKit Client SDK -->
+    <script src="https://unpkg.com/livekit-client/dist/livekit-client.umd.min.js"></script>
+    
+    <script>
+        let room = null;
+        let isConnected = false;
+
+        const statusIndicator = document.getElementById('statusIndicator');
+        const statusText = document.getElementById('statusText');
+        const callButton = document.getElementById('callButton');
+        const callStatus = document.getElementById('callStatus');
+        const visualizer = document.getElementById('visualizer');
+
+        function updateStatus(status) {
+            statusIndicator.className = 'status-indicator ' + status;
+            switch(status) {
+                case 'disconnected':
+                    statusText.textContent = 'Disconnected';
+                    callButton.className = 'call-button start';
+                    callButton.textContent = '📞';
+                    callStatus.textContent = 'Click to start voice call';
+                    visualizer.style.display = 'none';
+                    break;
+                case 'connecting':
+                    statusText.textContent = 'Connecting...';
+                    callButton.disabled = true;
+                    callStatus.textContent = 'Establishing connection...';
+                    break;
+                case 'connected':
+                    statusText.textContent = 'Connected';
+                    callButton.className = 'call-button end';
+                    callButton.textContent = '📵';
+                    callButton.disabled = false;
+                    callStatus.textContent = 'Speak to interact with Alex';
+                    visualizer.style.display = 'flex';
+                    animateVisualizer();
+                    break;
+            }
+        }
+
+        function animateVisualizer() {
+            if (!isConnected) return;
+            
+            const bars = document.querySelectorAll('.visualizer-bar');
+            bars.forEach(bar => {
+                const height = Math.random() * 40 + 10;
+                bar.style.height = height + 'px';
+            });
+            
+            requestAnimationFrame(() => setTimeout(animateVisualizer, 100));
+        }
+
+        async function toggleCall() {
+            if (isConnected) {
+                await disconnect();
+            } else {
+                await connect();
+            }
+        }
+
+        async function connect() {
+            const url = document.getElementById('livekitUrl').value;
+            const token = document.getElementById('roomToken').value;
+
+            if (!url || !token) {
+                alert('Please enter both LiveKit URL and Room Token');
+                return;
+            }
+
+            try {
+                updateStatus('connecting');
+                
+                room = new LivekitClient.Room({
+                    adaptiveStream: true,
+                    dynacast: true,
+                });
+
+                // Set up event handlers
+                room.on(LivekitClient.RoomEvent.Connected, () => {
+                    console.log('Connected to room');
+                    isConnected = true;
+                    updateStatus('connected');
+                });
+
+                room.on(LivekitClient.RoomEvent.Disconnected, () => {
+                    console.log('Disconnected from room');
+                    isConnected = false;
+                    updateStatus('disconnected');
+                });
+
+                room.on(LivekitClient.RoomEvent.TrackSubscribed, (track, publication, participant) => {
+                    console.log('Track subscribed:', track.kind);
+                    if (track.kind === 'audio') {
+                        const audioElement = track.attach();
+                        document.body.appendChild(audioElement);
+                    }
+                });
+
+                // Connect to room
+                await room.connect(url, token);
+
+                // Enable microphone
+                await room.localParticipant.setMicrophoneEnabled(true);
+                
+            } catch (error) {
+                console.error('Connection error:', error);
+                alert('Failed to connect: ' + error.message);
+                updateStatus('disconnected');
+            }
+        }
+
+        async function disconnect() {
+            if (room) {
+                await room.disconnect();
+                room = null;
+            }
+            isConnected = false;
+            updateStatus('disconnected');
+        }
+    </script>
+</body>
+</html>

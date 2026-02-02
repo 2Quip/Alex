@@ -1,9 +1,9 @@
 [project]
 name = "2quip-agent"
 version = "0.1.0"
-description = "Add your description here"
+description = "2Quip AI Agent with LiveKit Voice Integration"
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.12,<3.13"
 dependencies = [
     "agno>=2.3.24",
     "ddgs>=9.10.0",
@@ -12,4 +12,27 @@ dependencies = [
     "pydantic-settings>=2.12.0",
     "python-dotenv>=1.2.1",
     "sqlalchemy-libsql>=0.2.0",
+    # LiveKit Voice Agent dependencies
+    "livekit",
+    "livekit-agents",
+    "livekit-plugins-silero",
+    "livekit-plugins-noise-cancellation",
+    "livekit-plugins-turn-detector",
+    "livekit-plugins-assemblyai",
+    "livekit-plugins-cartesia",
+]
+
+[project.optional-dependencies]
+# Optional TTS/STT providers - install as needed
+deepgram = ["livekit-plugins-deepgram"]
+cartesia = ["livekit-plugins-cartesia"]
+assemblyai = ["livekit-plugins-assemblyai"]
+openai-realtime = ["livekit-plugins-openai"]
+
+# All voice providers
+voice-all = [
+    "livekit-plugins-deepgram",
+    "livekit-plugins-cartesia",
+    "livekit-plugins-assemblyai",
+    "livekit-plugins-openai",
 ]
