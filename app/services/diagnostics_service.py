@@ -6,6 +6,7 @@ from typing import List, Optional, Dict, Any, Callable
 from agno.agent import Agent
 from agno.db.sqlite import SqliteDb
 from agno.models.groq import Groq
+from agno.models.openai import OpenAIChat
 from agno.models.openrouter import OpenRouter
 from agno.run.agent import RunOutput
 from agno.tools.duckduckgo import DuckDuckGoTools
@@ -87,7 +88,8 @@ class DiagnosticsService:
             # Create the agent with structured output
             self.agent = Agent(
                 # model=Groq(id="openai/gpt-oss-120b", api_key=GROQ_API_KEY),
-                model=OpenRouter(id="google/gemini-2.5-flash", api_key=settings.OPENROUTER_API_KEY),
+                # model=OpenRouter(id="google/gemini-2.5-flash", api_key=settings.OPENROUTER_API_KEY),
+                model=OpenAIChat(id="gpt-5-mini-2025-08-07", api_key=settings.OPENAI_API_KEY),
                 markdown=False,
                 tools=[self.ddg_tools, sql_tools],
                 system_message=DIAGNOSTICS_SYSTEM_PROMPT,

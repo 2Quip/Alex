@@ -9,6 +9,7 @@ class Settings(BaseSettings):
 
     GROQ_API_KEY: str
     OPENROUTER_API_KEY: str
+    OPENAI_API_KEY: str
 
     @property
     def db_engine(self) -> str:

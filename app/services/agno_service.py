@@ -14,6 +14,7 @@ from agno.agent import (
 )
 from agno.db.sqlite import SqliteDb
 from agno.models.groq import Groq
+from agno.models.openai import OpenAIChat
 from agno.run.agent import RunContentCompletedEvent, RunOutput
 from agno.tools.duckduckgo import DuckDuckGoTools
 from agno.tools.sql import SQLTools
@@ -26,6 +27,7 @@ logger = logging.getLogger(__name__)
 # System prompt for the agent
 ENGINE = settings.db_engine
 GROQ_API_KEY = settings.GROQ_API_KEY
+OPENAI_API_KEY = settings.OPENAI_API_KEY
 SYSTEM_PROMPT = """
 You are Alex, an AI service agent specialized in work order and repair services. You assist technicians with troubleshooting and support managers with operational analysis.
 
@@ -175,7 +177,8 @@ class AgnoService:
 
             # Create the agent with web search and database tools
             self.agent = Agent(
-                model=Groq(id="openai/gpt-oss-120b", api_key=GROQ_API_KEY),
+                # model=Groq(id="openai/gpt-oss-120b", api_key=GROQ_API_KEY),
+                model=OpenAIChat(id="gpt-5-mini-2025-08-07", api_key=OPENAI_API_KEY),
                 markdown=False,
                 tools=[self.ddg_tools, sql_tools],
                 system_message=SYSTEM_PROMPT,
