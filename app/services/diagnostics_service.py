@@ -77,7 +77,6 @@ class DiagnosticsService:
         try:
             # Initialize DuckDuckGo tools
             self.ddg_tools = DuckDuckGoTools(
-                backend="auto",
                 timeout=20,
                 fixed_max_results=10,
             )

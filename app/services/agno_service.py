@@ -168,7 +168,6 @@ class AgnoService:
         try:
             # Initialize DuckDuckGo tools once (these don't expire)
             self.ddg_tools = DuckDuckGoTools(
-                backend="auto",  # Automatically select best backend (bing, yahoo, or duckduckgo)
                 timeout=20,  # Increased timeout for reliability
                 fixed_max_results=10,  # Limit results per query to avoid rate limiting
             )

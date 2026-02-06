@@ -18,4 +18,4 @@ server.pid
 
 # Others
 /tmp
-
+nohup.out

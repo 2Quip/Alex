@@ -178,7 +178,7 @@ async def voice_agent(ctx: JobContext):
         ),
         
         # Turn detection for natural conversation flow
-        turn_detection=MultilingualModel(),
+        # turn_detection=MultilingualModel(),
         
         # Voice Activity Detection (prewarmed)
         vad=ctx.proc.userdata["vad"],
