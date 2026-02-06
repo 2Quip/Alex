@@ -1,9 +1,11 @@
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy import create_engine
 from typing import Optional
 
 
 class Settings(BaseSettings):
+    model_config = SettingsConfigDict(env_file=".env")
+
     # Database Configuration
     DATABASE_URL: str
     DATABASE_AUTH_TOKEN: str
@@ -23,6 +25,14 @@ class Settings(BaseSettings):
     CARTESIA_API_KEY: Optional[str] = None
     DEEPGRAM_API_KEY: Optional[str] = None
 
+    # Document webhook (optional - for sending documents to users during calls)
+    DOCUMENT_WEBHOOK_URL: Optional[str] = None
+    DOCUMENT_WEBHOOK_SECRET: Optional[str] = None
+
+    # Logging
+    LOG_LEVEL: str = "INFO"
+    LOG_FILE: str = "logs/agno_agent_api.log"
+
     @property
     def db_engine(self) -> str:
         engine = create_engine(
@@ -35,8 +45,6 @@ class Settings(BaseSettings):
         )
         return engine
 
-    class Config:
-        env_file = ".env"
 
 
 settings = Settings()

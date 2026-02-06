@@ -1,7 +1,7 @@
 import logging
 import time
 import uuid
-from typing import List, Optional, Dict, Any, Callable
+from typing import List, Optional
 
 from agno.agent import Agent
 from agno.db.sqlite import SqliteDb
@@ -14,6 +14,8 @@ from agno.tools.sql import SQLTools
 from pydantic import BaseModel, Field
 
 from app.config.settings import settings
+from app.core.logging import logger_hook
+from app.tools.send_document import SendDocumentTool
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +30,9 @@ You are Alex, an AI diagnostic specialist for equipment troubleshooting.
 Query the `listing` table for the id to get equipment information. If no data found, use web search as fallback.
 Analyze the reported issue/symptoms and provide up to 5 potential diagnostics.
 Keep diagnostics clear, actionable, and prioritized by likelihood.
-Do not add any special markdown formatting, just plain text
+Do not add any special markdown formatting, just plain text.
+
+If the user asks you to send or share a document (PDF, repair guide, manual), use the send_document tool with the title and URL instead of just describing the content.
 """
 
 # Turso Database for chat history storage
@@ -39,23 +43,6 @@ class DiagnosticsOutput(BaseModel):
     """Structured output for diagnostics"""
     diagnostics: List[str] = Field(..., max_length=5, description="List of potential diagnoses (max 5)")
 
-def logger_hook(
-    function_name: str, function_call: Callable, arguments: Dict[str, Any]
-):
-    """Log the duration of the function call"""
-    start_time = time.time()
-
-    # Call the function
-    result = function_call(**arguments)
-
-    end_time = time.time()
-    duration = end_time - start_time
-
-    logger.info(f"Function {function_name} took {duration:.2f} seconds to execute")
-
-    # Return the result
-    return result
-
 class DiagnosticsService:
     """Service for handling equipment diagnostics with structured output"""
 
@@ -63,6 +50,7 @@ class DiagnosticsService:
         self.agent: Optional[Agent] = None
         self._initialized = False
         self.ddg_tools = None
+        self._extra_tools: list = []
 
     def _create_sql_tools(self):
         """Create a fresh SQLTools instance to avoid connection expiration"""
@@ -84,13 +72,18 @@ class DiagnosticsService:
             # Create fresh SQL tools instance
             sql_tools = self._create_sql_tools()
 
+            # Build tools list
+            if settings.DOCUMENT_WEBHOOK_URL:
+                self._extra_tools.append(SendDocumentTool(webhook_url=settings.DOCUMENT_WEBHOOK_URL, webhook_secret=settings.DOCUMENT_WEBHOOK_SECRET))
+            tools = [self.ddg_tools, sql_tools] + self._extra_tools
+
             # Create the agent with structured output
             self.agent = Agent(
                 # model=Groq(id="openai/gpt-oss-120b", api_key=GROQ_API_KEY),
                 # model=OpenRouter(id="google/gemini-2.5-flash", api_key=settings.OPENROUTER_API_KEY),
                 model=OpenAIChat(id="gpt-5-mini-2025-08-07", api_key=settings.OPENAI_API_KEY),
                 markdown=False,
-                tools=[self.ddg_tools, sql_tools],
+                tools=tools,
                 system_message=DIAGNOSTICS_SYSTEM_PROMPT,
                 db=turso_db,
                 add_history_to_context=True,
@@ -140,7 +133,7 @@ class DiagnosticsService:
         # Create fresh SQL tools for this request
         logger.debug("Creating fresh SQL tools for diagnostics request")
         fresh_sql_tools = self._create_sql_tools()
-        self.agent.tools = [self.ddg_tools, fresh_sql_tools]
+        self.agent.tools = [self.ddg_tools, fresh_sql_tools] + self._extra_tools
 
         # Generate session ID if not provided
         if not session_id:

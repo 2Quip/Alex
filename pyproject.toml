@@ -36,3 +36,6 @@ voice-all = [
     "livekit-plugins-assemblyai",
     "livekit-plugins-openai",
 ]
+
+[dependency-groups]
+dev = ["pytest>=8.0", "pytest-asyncio>=0.24", "httpx>=0.27"]

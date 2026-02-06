@@ -5,7 +5,11 @@
 
 from __future__ import annotations
 
+import logging
+import re
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 from agno.agent import Agent
 from agno.run.agent import RunContentEvent, RunOutput
@@ -94,7 +98,10 @@ class AgnoStream(llm.LLMStream):
         # Convert chat context to the last user message for Agno
         user_input = self._get_user_input()
         if not user_input:
+            logger.debug("No user input found in chat context")
             return
+
+        logger.debug("AgnoStream running with input: %s", user_input[:200])
 
         # Run agent with streaming
         response_stream = self._agent.arun(
@@ -119,6 +126,34 @@ class AgnoStream(llm.LLMStream):
         return None
 
 
+def _sanitize_for_tts(text: str) -> str:
+    """Strip markdown and special characters so TTS reads natural speech."""
+    # Remove markdown headers (### Header)
+    text = re.sub(r"#{1,6}\s*", "", text)
+    # Remove bold/italic markers (**bold**, *italic*, __bold__, _italic_)
+    text = re.sub(r"\*{1,3}(.*?)\*{1,3}", r"\1", text)
+    text = re.sub(r"_{1,3}(.*?)_{1,3}", r"\1", text)
+    # Remove inline code backticks
+    text = re.sub(r"`([^`]*)`", r"\1", text)
+    # Remove code fence markers
+    text = re.sub(r"```[\s\S]*?```", "", text)
+    # Convert markdown links [text](url) to just the text
+    text = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", text)
+    # Remove bullet point markers (-, *, •) at start of lines
+    text = re.sub(r"(?m)^\s*[-*•]\s+", "", text)
+    # Remove numbered list markers (1. 2. etc.) at start of lines
+    text = re.sub(r"(?m)^\s*\d+\.\s+", "", text)
+    # Remove horizontal rules (---, ***, ___)
+    text = re.sub(r"(?m)^[-*_]{3,}\s*$", "", text)
+    # Collapse multiple newlines into a single space
+    text = re.sub(r"\n{2,}", " ", text)
+    # Replace single newlines with space
+    text = re.sub(r"\n", " ", text)
+    # Collapse multiple spaces
+    text = re.sub(r" {2,}", " ", text)
+    return text.strip()
+
+
 def _to_chat_chunk(event: Any) -> llm.ChatChunk | None:
     """Convert Agno event to LiveKit ChatChunk."""
     content = None
@@ -131,6 +166,9 @@ def _to_chat_chunk(event: Any) -> llm.ChatChunk | None:
         )
     elif hasattr(event, "content") and event.content:
         content = str(event.content)
+
+    if content:
+        content = _sanitize_for_tts(content)
 
     if content:
         return llm.ChatChunk(

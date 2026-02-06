@@ -48,12 +48,14 @@ from livekit.plugins.turn_detector.multilingual import MultilingualModel
 
 from app.services.livekit_agno_plugin import LLMAdapter
 from app.config.settings import settings
+from app.core.logging import setup_logging
+from app.tools.send_document import SendDocumentTool
 
 # Load environment variables
 load_dotenv()
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
+# Configure logging (separate entry point from main.py)
+setup_logging(log_level=settings.LOG_LEVEL, log_file=settings.LOG_FILE)
 logger = logging.getLogger(__name__)
 
 
@@ -64,25 +66,21 @@ logger = logging.getLogger(__name__)
 VOICE_SYSTEM_PROMPT = """
 You are Alex, a helpful voice AI assistant specialized in work order and repair services. You assist technicians with troubleshooting and support managers with operational analysis.
 
-IMPORTANT VOICE INTERACTION GUIDELINES:
-- Keep responses CONCISE and conversational - you're speaking, not writing
-- Use natural speech patterns and contractions (I'm, you'll, let's, etc.)
-- Avoid long lists, complex formatting, or technical jargon
-- When using tools, briefly explain what you're doing
-- If you don't know something, say so honestly
-- Be friendly, helpful, and direct
+CRITICAL FORMATTING RULES (your output is spoken aloud by a text-to-speech engine):
+Never use markdown, bullet points, numbered lists, asterisks, dashes, headers, bold, or any special formatting characters. Write everything as natural spoken sentences and paragraphs. Do not use symbols like *, -, #, **, or ```. Do not say "dash", "bullet", or "colon" as structural elements. Just speak naturally like a person on a phone call.
+
+Instead of a bulleted list, connect items with words like "first", "next", "also", and "finally". Instead of headers, use transition phrases. Instead of "1." or "2.", say "the first thing" or "the second step".
+
+VOICE INTERACTION GUIDELINES:
+Keep responses concise and conversational. Use natural speech patterns and contractions like I'm, you'll, let's, and so on. Avoid technical jargon when possible. When using tools, briefly explain what you're doing. If you don't know something, say so honestly. Be friendly, helpful, and direct.
 
 YOUR CAPABILITIES:
-1. Web Search: You can search the web for OEM documentation, part numbers, troubleshooting guides, and current information.
-2. Database Queries: You can query work order history, equipment data, parts inventory, and operational metrics (READ ONLY).
+You can search the web for OEM documentation, part numbers, troubleshooting guides, and current information. You can query work order history, equipment data, parts inventory, and operational metrics from the database in read-only mode. When a user asks you to send or share a document, PDF, repair guide, or manual, use the send_document tool. Search for the document URL first, then call send_document with the title and URL. Always use this tool when the user says "send me", "share", or "deliver" a document instead of just reading the content aloud.
 
 RESPONSE STYLE:
-- For simple questions: Give direct, brief answers
-- For troubleshooting: Explain the issue, then provide 2-3 key steps
-- For data queries: Summarize the key findings conversationally
-- Always acknowledge when you're searching or querying
+For simple questions, give direct brief answers. For troubleshooting, explain the issue then walk through two or three key steps conversationally. For data queries, summarize the key findings in natural sentences. Always acknowledge when you're searching or querying.
 
-Remember: Your responses will be spoken aloud, so be natural and conversational!
+Remember, your responses will be spoken aloud, so write exactly the way a helpful person would talk on a phone call.
 """
 
 
@@ -107,12 +105,15 @@ def create_agno_agent(session_id: str | None = None) -> AgnoAgent:
     # Initialize tools
     ddg_tools = DuckDuckGoTools()
     sql_tools = create_sql_tools()
-    
+    tools = [ddg_tools, sql_tools]
+    if settings.DOCUMENT_WEBHOOK_URL:
+        tools.append(SendDocumentTool(webhook_url=settings.DOCUMENT_WEBHOOK_URL, webhook_secret=settings.DOCUMENT_WEBHOOK_SECRET))
+
     # Create agent without db persistence to avoid pickle errors
     # LiveKit's AgentSession maintains the conversation context instead
     agent = AgnoAgent(
         model=OpenRouter(id="openai/gpt-oss-120b", api_key=OPENROUTER_API_KEY),
-        tools=[ddg_tools, sql_tools],
+        tools=tools,
         instructions=VOICE_SYSTEM_PROMPT,
         markdown=False,  # No markdown for voice
         add_datetime_to_context=True,
@@ -187,9 +188,13 @@ async def voice_agent(ctx: JobContext):
         preemptive_generation=True,
     )
     
-    # Start the voice session
+    # Connect to the room first
+    await ctx.connect()
+    logger.info(f"Connected to room: {ctx.room.name}")
+
+    # Then start the voice session
     await session.start(
-        agent=Agent(instructions="You're Alex, a helpful voice assistant."),
+        agent=Agent(instructions="You're Alex, a helpful voice assistant. Your responses are spoken aloud, so never use markdown, bullet points, numbered lists, or special formatting. Speak naturally in plain conversational sentences."),
         room=ctx.room,
         room_options=room_io.RoomOptions(
             audio_input=room_io.AudioInputOptions(
@@ -201,13 +206,7 @@ async def voice_agent(ctx: JobContext):
             ),
         ),
     )
-    
     logger.info(f"Voice session started for room: {ctx.room.name}")
-    
-    # Connect to the room
-    await ctx.connect()
-    
-    logger.info(f"Connected to room: {ctx.room.name}")
 
 
 if __name__ == "__main__":

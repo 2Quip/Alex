@@ -12,8 +12,9 @@ wheels/
 # Environment variables
 .env
 
-# Server 
+# Server
 *.log
+logs/
 server.pid
 
 # Others

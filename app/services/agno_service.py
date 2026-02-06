@@ -1,7 +1,7 @@
 import logging
 import time
 import uuid
-from typing import Optional, Callable, Dict, Any
+from typing import Optional
 
 from agno.agent import (
     Agent,
@@ -20,6 +20,8 @@ from agno.tools.duckduckgo import DuckDuckGoTools
 from agno.tools.sql import SQLTools
 
 from app.config.settings import settings
+from app.core.logging import logger_hook
+from app.tools.send_document import SendDocumentTool
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +54,8 @@ AVAILABLE TOOLS
 1. Web Search (DuckDuckGo): Use this to find OEM documentation (specs, user guides, maintenance schedules), look up part numbers and alternatives, research error codes and troubleshooting procedures, find current availability and pricing information, and access manufacturer telematics documentation.
 
 2. Database Tools (SQL) - READ ONLY: Use this to query work order history and status, equipment utilization and performance data, parts inventory and usage history, technician assignments and workload, and cost and time tracking metrics. IMPORTANT: You can ONLY execute SELECT queries. No INSERT, UPDATE, DELETE, or data modifications are allowed.
+
+3. Send Document: When a user asks you to send, share, or deliver a document (PDF, repair guide, manual, etc.), use the send_document tool. First search the web for the document URL, then call send_document with the title, URL, and recipient. Always use this tool when the user says things like "send me", "share", "email me", or "deliver" a document. Do NOT just paste the link in the chat — use the send_document tool so it gets delivered to the user properly.
 
 AUTOMATIC MODE DETECTION
 
@@ -129,24 +133,6 @@ You are Alex - efficient, knowledgeable, and always focused on helping users get
 
 turso_db = SqliteDb(db_file="tmp/data.db")
 
-def logger_hook(
-    function_name: str, function_call: Callable, arguments: Dict[str, Any]
-):
-    """Log the duration of the function call"""
-    start_time = time.time()
-
-    # Call the function
-    result = function_call(**arguments)
-
-    end_time = time.time()
-    duration = end_time - start_time
-    logger.info(f"Function {function_name} had these arguments: {arguments}")
-    logger.info(f"Function {function_name} took {duration:.2f} seconds to execute")
-    logger.info(f"Function {function_name} returned: {result}")
-
-    # Return the result
-    return result
-
 class AgnoService:
     """Service for handling chat with Agno agent with web search and database tools"""
 
@@ -154,6 +140,7 @@ class AgnoService:
         self.agent: Optional[Agent] = None
         self._initialized = False
         self.ddg_tools = None
+        self._extra_tools: list = []
 
     def _create_sql_tools(self):
         """Create a fresh SQLTools instance to avoid connection expiration"""
@@ -168,18 +155,23 @@ class AgnoService:
         try:
             # Initialize DuckDuckGo tools once (these don't expire)
             self.ddg_tools = DuckDuckGoTools(
-                timeout=20,  # Increased timeout for reliability
-                fixed_max_results=10,  # Limit results per query to avoid rate limiting
+                timeout=20,
+                fixed_max_results=10,
             )
             # Create fresh SQL tools instance for initial setup
             sql_tools = self._create_sql_tools()
+
+            # Build tools list
+            if settings.DOCUMENT_WEBHOOK_URL:
+                self._extra_tools.append(SendDocumentTool(webhook_url=settings.DOCUMENT_WEBHOOK_URL, webhook_secret=settings.DOCUMENT_WEBHOOK_SECRET))
+            tools = [self.ddg_tools, sql_tools] + self._extra_tools
 
             # Create the agent with web search and database tools
             self.agent = Agent(
                 # model=Groq(id="openai/gpt-oss-120b", api_key=GROQ_API_KEY),
                 model=OpenAIChat(id="gpt-5-mini-2025-08-07", api_key=OPENAI_API_KEY),
                 markdown=False,
-                tools=[self.ddg_tools, sql_tools],
+                tools=tools,
                 system_message=SYSTEM_PROMPT,
                 db=turso_db,  # Use Turso (SQLite-compatible) for chat history
                 add_history_to_context=True,
@@ -226,7 +218,7 @@ class AgnoService:
         # Create fresh SQL tools for EVERY request to avoid Turso connection expiration
         logger.debug("Creating fresh SQL tools for this request")
         fresh_sql_tools = self._create_sql_tools()
-        self.agent.tools = [self.ddg_tools, fresh_sql_tools]
+        self.agent.tools = [self.ddg_tools, fresh_sql_tools] + self._extra_tools
 
         # Generate session ID if not provided
         if not session_id:
@@ -290,7 +282,7 @@ class AgnoService:
         # Create fresh SQL tools for EVERY request to avoid Turso connection expiration
         logger.debug("Creating fresh SQL tools for this streaming request")
         fresh_sql_tools = self._create_sql_tools()
-        self.agent.tools = [self.ddg_tools, fresh_sql_tools]
+        self.agent.tools = [self.ddg_tools, fresh_sql_tools] + self._extra_tools
 
         # Generate session ID if not provided
         if not session_id:

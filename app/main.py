@@ -7,18 +7,16 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from app.services.agno_service import agno_service
-from app.services.diagnostics_service import diagnostics_service
+from app.config.settings import settings
+from app.core.logging import setup_logging
 
-# Configure logging
+# Configure logging before importing services (so their module-level code inherits config)
+setup_logging(log_level=settings.LOG_LEVEL, log_file=settings.LOG_FILE)
+
+from app.services.agno_service import agno_service  # noqa: E402
+from app.services.diagnostics_service import diagnostics_service  # noqa: E402
 
 logger = logging.getLogger(__name__)
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    filename="agno_agent_api.log",
-)
 
 
 # Request/Response models
