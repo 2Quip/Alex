@@ -32,6 +32,10 @@ class Settings(BaseSettings):
     # Logging
     LOG_LEVEL: str = "INFO"
     LOG_FILE: str = "logs/agno_agent_api.log"
+    LOG_FORMAT: str = "text"  # "text" or "json"
+
+    # Voice agent health check
+    VOICE_HEALTH_PORT: int = 8092
 
     @property
     def db_engine(self) -> str:

@@ -11,7 +11,7 @@ from app.config.settings import settings
 from app.core.logging import setup_logging
 
 # Configure logging before importing services (so their module-level code inherits config)
-setup_logging(log_level=settings.LOG_LEVEL, log_file=settings.LOG_FILE)
+setup_logging(log_level=settings.LOG_LEVEL, log_file=settings.LOG_FILE, log_format=settings.LOG_FORMAT)
 
 from app.services.agno_service import agno_service  # noqa: E402
 from app.services.diagnostics_service import diagnostics_service  # noqa: E402

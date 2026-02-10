@@ -50,12 +50,13 @@ from app.services.livekit_agno_plugin import LLMAdapter
 from app.config.settings import settings
 from app.core.logging import setup_logging
 from app.tools.send_document import SendDocumentTool
+from app.voice_health import health, start_health_server
 
 # Load environment variables
 load_dotenv()
 
 # Configure logging (separate entry point from main.py)
-setup_logging(log_level=settings.LOG_LEVEL, log_file=settings.LOG_FILE)
+setup_logging(log_level=settings.LOG_LEVEL, log_file=settings.LOG_FILE, log_format=settings.LOG_FORMAT)
 logger = logging.getLogger(__name__)
 
 
@@ -142,6 +143,14 @@ def prewarm(proc: JobProcess):
 server.setup_fnc = prewarm
 
 
+@server.on("worker_started")
+async def on_worker_started():
+    """Start health server and mark agent as running."""
+    await start_health_server(port=settings.VOICE_HEALTH_PORT)
+    health.mark_running()
+    logger.info("Voice agent worker started, health server running")
+
+
 @server.rtc_session()
 async def voice_agent(ctx: JobContext):
     """Main voice agent session handler."""
@@ -152,61 +161,66 @@ async def voice_agent(ctx: JobContext):
     }
     
     logger.info(f"Voice agent starting for room: {ctx.room.name}")
-    
-    # Get the room SID (it's a coroutine property, so we need to await it)
-    
-    # Create the Agno agent with room-specific session
-    agno_agent = create_agno_agent()
-    
-    # Wrap the Agno agent for LiveKit
-    livekit_llm = LLMAdapter(
-        agent=agno_agent,
-        session_id=ctx.room.name,
-    )
-    
-    # Create the voice pipeline session
-    session = AgentSession(
-        # Speech-to-text (STT) - your agent's ears
-        stt=inference.STT(model="assemblyai/universal-streaming", language="en"),
-        
-        # LLM - your agent's brain (Agno wrapped for LiveKit)
-        llm=livekit_llm,
-        
-        # Text-to-speech (TTS) - your agent's voice
-        tts=inference.TTS(
-            model="cartesia/sonic-3",
-            voice="9626c31c-bec5-4cca-baa8-f8ba9e84c8bc"  # A natural-sounding voice
-        ),
-        
-        # Turn detection for natural conversation flow
-        # turn_detection=MultilingualModel(),
-        
-        # Voice Activity Detection (prewarmed)
-        vad=ctx.proc.userdata["vad"],
-        
-        # Allow LLM to start generating while user is finishing speaking
-        preemptive_generation=True,
-    )
-    
-    # Connect to the room first
-    await ctx.connect()
-    logger.info(f"Connected to room: {ctx.room.name}")
+    health.session_started()
 
-    # Then start the voice session
-    await session.start(
-        agent=Agent(instructions="You're Alex, a helpful voice assistant. Your responses are spoken aloud, so never use markdown, bullet points, numbered lists, or special formatting. Speak naturally in plain conversational sentences."),
-        room=ctx.room,
-        room_options=room_io.RoomOptions(
-            audio_input=room_io.AudioInputOptions(
-                noise_cancellation=lambda params: (
-                    noise_cancellation.BVCTelephony()
-                    if params.participant.kind == rtc.ParticipantKind.PARTICIPANT_KIND_SIP
-                    else noise_cancellation.BVC()
+    try:
+        # Create the Agno agent with room-specific session
+        agno_agent = create_agno_agent()
+
+        # Wrap the Agno agent for LiveKit
+        livekit_llm = LLMAdapter(
+            agent=agno_agent,
+            session_id=ctx.room.name,
+        )
+
+        # Create the voice pipeline session
+        session = AgentSession(
+            # Speech-to-text (STT) - your agent's ears
+            stt=inference.STT(model="assemblyai/universal-streaming", language="en"),
+
+            # LLM - your agent's brain (Agno wrapped for LiveKit)
+            llm=livekit_llm,
+
+            # Text-to-speech (TTS) - your agent's voice
+            tts=inference.TTS(
+                model="cartesia/sonic-3",
+                voice="9626c31c-bec5-4cca-baa8-f8ba9e84c8bc"  # A natural-sounding voice
+            ),
+
+            # Turn detection for natural conversation flow
+            # turn_detection=MultilingualModel(),
+
+            # Voice Activity Detection (prewarmed)
+            vad=ctx.proc.userdata["vad"],
+
+            # Allow LLM to start generating while user is finishing speaking
+            preemptive_generation=True,
+        )
+
+        # Connect to the room first
+        await ctx.connect()
+        logger.info(f"Connected to room: {ctx.room.name}")
+
+        # Then start the voice session
+        await session.start(
+            agent=Agent(instructions="You're Alex, a helpful voice assistant. Your responses are spoken aloud, so never use markdown, bullet points, numbered lists, or special formatting. Speak naturally in plain conversational sentences."),
+            room=ctx.room,
+            room_options=room_io.RoomOptions(
+                audio_input=room_io.AudioInputOptions(
+                    noise_cancellation=lambda params: (
+                        noise_cancellation.BVCTelephony()
+                        if params.participant.kind == rtc.ParticipantKind.PARTICIPANT_KIND_SIP
+                        else noise_cancellation.BVC()
+                    ),
                 ),
             ),
-        ),
-    )
-    logger.info(f"Voice session started for room: {ctx.room.name}")
+        )
+        logger.info(f"Voice session started for room: {ctx.room.name}")
+    except Exception as e:
+        health.mark_error(str(e))
+        raise
+    finally:
+        health.session_ended()
 
 
 if __name__ == "__main__":
