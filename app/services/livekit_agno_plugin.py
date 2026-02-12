@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 from typing import Any
@@ -13,6 +14,8 @@ logger = logging.getLogger(__name__)
 
 from agno.agent import Agent
 from agno.run.agent import RunContentEvent, RunOutput
+
+from app.core.retry import MAX_RETRIES, RETRY_BACKOFF, _is_retryable
 
 from livekit.agents.llm.chat_context import ChatContext, ChatMessage
 from livekit.agents import llm
@@ -103,18 +106,36 @@ class AgnoStream(llm.LLMStream):
 
         logger.debug("AgnoStream running with input: %s", user_input[:200])
 
-        # Run agent with streaming
-        response_stream = self._agent.arun(
-            input=user_input,
-            stream=True,
-            session_id=self._session_id,
-            user_id=self._user_id,
-        )
+        # Retry loop for transient LLM failures during voice streaming.
+        # Only retry if no content has been sent yet.
+        content_sent = False
+        for attempt in range(MAX_RETRIES):
+            try:
+                response_stream = self._agent.arun(
+                    input=user_input,
+                    stream=True,
+                    session_id=self._session_id,
+                    user_id=self._user_id,
+                )
 
-        async for event in response_stream:
-            chunk = _to_chat_chunk(event)
-            if chunk:
-                self._event_ch.send_nowait(chunk)
+                async for event in response_stream:
+                    chunk = _to_chat_chunk(event)
+                    if chunk:
+                        content_sent = True
+                        self._event_ch.send_nowait(chunk)
+
+                # Stream completed successfully
+                return
+
+            except Exception as e:
+                if content_sent or not _is_retryable(e) or attempt >= MAX_RETRIES - 1:
+                    raise
+                wait = RETRY_BACKOFF[attempt] if attempt < len(RETRY_BACKOFF) else RETRY_BACKOFF[-1]
+                logger.warning(
+                    "Voice stream attempt %d/%d failed (%s: %s), retrying in %ds",
+                    attempt + 1, MAX_RETRIES, type(e).__name__, str(e)[:200], wait,
+                )
+                await asyncio.sleep(wait)
 
     def _get_user_input(self) -> str | None:
         """Extract the last user message from chat context."""
@@ -151,7 +172,7 @@ def _sanitize_for_tts(text: str) -> str:
     text = re.sub(r"\n", " ", text)
     # Collapse multiple spaces
     text = re.sub(r" {2,}", " ", text)
-    return text.strip()
+    return text
 
 
 def _to_chat_chunk(event: Any) -> llm.ChatChunk | None:

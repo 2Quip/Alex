@@ -129,8 +129,9 @@ async def test_chat_error_propagates(agno_service_instance):
     agno_service_instance.agent.arun = AsyncMock(
         side_effect=RuntimeError("API error")
     )
-    with pytest.raises(RuntimeError, match="API error"):
-        await agno_service_instance.chat(message="Hi", session_id="s1")
+    with patch("app.core.retry.asyncio.sleep", new_callable=AsyncMock):
+        with pytest.raises(RuntimeError, match="API error"):
+            await agno_service_instance.chat(message="Hi", session_id="s1")
 
 
 # --- Chat Stream ---
@@ -221,11 +222,13 @@ async def test_chat_stream_exception_yields_error(agno_service_instance):
         raise RuntimeError("stream broke")
         yield  # noqa: unreachable — makes this an async generator
 
-    agno_service_instance.agent.arun = MagicMock(return_value=failing_stream())
+    # side_effect creates a fresh failing generator for each retry attempt
+    agno_service_instance.agent.arun = MagicMock(side_effect=lambda **kw: failing_stream())
 
     chunks = []
-    async for chunk in agno_service_instance.chat_stream(message="Hi", session_id="s1"):
-        chunks.append(chunk)
+    with patch("app.services.agno_service.asyncio.sleep", new_callable=AsyncMock):
+        async for chunk in agno_service_instance.chat_stream(message="Hi", session_id="s1"):
+            chunks.append(chunk)
 
     error_chunks = [c for c in chunks if '"type": "error"' in c]
     assert len(error_chunks) == 1

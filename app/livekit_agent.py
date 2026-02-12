@@ -144,9 +144,10 @@ server.setup_fnc = prewarm
 
 
 @server.on("worker_started")
-async def on_worker_started():
+def on_worker_started():
     """Start health server and mark agent as running."""
-    await start_health_server(port=settings.VOICE_HEALTH_PORT)
+    import asyncio
+    asyncio.create_task(start_health_server(port=settings.VOICE_HEALTH_PORT))
     health.mark_running()
     logger.info("Voice agent worker started, health server running")
 

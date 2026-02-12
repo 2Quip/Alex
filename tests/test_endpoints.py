@@ -1,7 +1,7 @@
 """Tests for FastAPI endpoints in app/main.py."""
 
 import json
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -131,3 +131,63 @@ async def test_diagnostics_service_error(client):
             json={"message": "broken", "listing_id": "EQP-1", "user_id": "u1"},
         )
     assert resp.status_code == 500
+
+
+# --- LiveKit Token tests ---
+
+
+@pytest.mark.asyncio
+async def test_livekit_token(client):
+    mock_token = MagicMock()
+    mock_token.to_jwt.return_value = "eyJ.test.token"
+    with patch("app.main.settings") as mock_settings, patch(
+        "livekit.api.AccessToken", return_value=mock_token
+    ):
+        mock_settings.LIVEKIT_URL = "wss://test.livekit.cloud"
+        mock_settings.LIVEKIT_API_KEY = "APIkey123"
+        mock_settings.LIVEKIT_API_SECRET = "secret456"
+        resp = await client.post(
+            "/livekit/token",
+            json={"identity": "user-1", "room": "test-room"},
+        )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["token"] == "eyJ.test.token"
+    assert data["url"] == "wss://test.livekit.cloud"
+
+
+@pytest.mark.asyncio
+async def test_livekit_token_missing_identity(client):
+    resp = await client.post("/livekit/token", json={"room": "test-room"})
+    assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_livekit_token_not_configured(client):
+    with patch("app.main.settings") as mock_settings:
+        mock_settings.LIVEKIT_URL = None
+        mock_settings.LIVEKIT_API_KEY = None
+        mock_settings.LIVEKIT_API_SECRET = None
+        resp = await client.post(
+            "/livekit/token",
+            json={"identity": "user-1", "room": "test-room"},
+        )
+    assert resp.status_code == 503
+
+
+@pytest.mark.asyncio
+async def test_livekit_token_with_name(client):
+    mock_token = MagicMock()
+    mock_token.to_jwt.return_value = "eyJ.named.token"
+    with patch("app.main.settings") as mock_settings, patch(
+        "livekit.api.AccessToken", return_value=mock_token
+    ):
+        mock_settings.LIVEKIT_URL = "wss://test.livekit.cloud"
+        mock_settings.LIVEKIT_API_KEY = "APIkey123"
+        mock_settings.LIVEKIT_API_SECRET = "secret456"
+        resp = await client.post(
+            "/livekit/token",
+            json={"identity": "user-1", "room": "test-room", "name": "Alice"},
+        )
+    assert resp.status_code == 200
+    mock_token.with_name.assert_called_once_with("Alice")

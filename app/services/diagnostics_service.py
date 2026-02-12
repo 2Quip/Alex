@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 
 from app.config.settings import settings
 from app.core.logging import logger_hook
+from app.core.retry import with_retry
 from app.tools.send_document import SendDocumentTool
 
 logger = logging.getLogger(__name__)
@@ -153,8 +154,9 @@ Return the response as structured JSON with the diagnostics array.
         try:
             start_time = time.time()
             
-            # Run the agent with structured output
-            response: RunOutput = await self.agent.arun(
+            # Run the agent with structured output and retry for transient failures
+            response: RunOutput = await with_retry(
+                self.agent.arun,
                 input=diagnostic_message,
                 session_id=session_id,
                 user_id=user_id,

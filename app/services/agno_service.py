@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import time
 import uuid
@@ -21,6 +22,7 @@ from agno.tools.sql import SQLTools
 
 from app.config.settings import settings
 from app.core.logging import logger_hook
+from app.core.retry import MAX_RETRIES, RETRY_BACKOFF, _is_retryable, with_retry
 from app.tools.send_document import SendDocumentTool
 
 logger = logging.getLogger(__name__)
@@ -225,9 +227,10 @@ class AgnoService:
             session_id = str(uuid.uuid4())
 
         try:
-            # Run the agent asynchronously
+            # Run the agent asynchronously with retry for transient LLM failures
             start_time = time.time()
-            response: RunOutput = await self.agent.arun(
+            response: RunOutput = await with_retry(
+                self.agent.arun,
                 input=message,
                 session_id=session_id,
                 user_id=user_id,
@@ -301,72 +304,92 @@ class AgnoService:
             # Send session ID first
             yield f"data: {json.dumps({'type': 'session', 'session_id': session_id})}\n\n"
 
-            # Run the agent with streaming
+            # Retry loop for transient LLM failures during streaming.
+            # Only retry if no content has been sent to the client yet.
+            content_yielded = False
             start_time = time.time()
-            response_stream = self.agent.arun(
-                input=message,
-                session_id=session_id,
-                user_id=user_id,
-                stream=True,
-                stream_events=True,
-            )
 
-            # Stream the response chunks using proper Agno event types
-            async for chunk in response_stream:
-                chunk_type = type(chunk).__name__
-
-                if isinstance(chunk, RunStartedEvent):
-                    # Run started - agent is beginning to process
-                    logger.debug("Agent run started")
-
-                elif isinstance(chunk, ToolCallStartedEvent):
-                    # Tool execution started
-                    tool_name = chunk.tool.tool_name
-                    tool_args = chunk.tool.tool_args
-                    tool_info = tool_action_map.get(
-                        tool_name, {"icon": "🔧", "action": f"Using {tool_name}"}
+            for attempt in range(MAX_RETRIES):
+                try:
+                    # Run the agent with streaming
+                    response_stream = self.agent.arun(
+                        input=message,
+                        session_id=session_id,
+                        user_id=user_id,
+                        stream=True,
+                        stream_events=True,
                     )
-                    logger.info(f"Tool started: {tool_name}")
-                    yield f"data: {json.dumps({'type': 'tool_start', 'tool': tool_name, 'icon': tool_info['icon'], 'action': tool_info['action'], 'args': str(tool_args)[:200]})}\n\n"
 
-                elif isinstance(chunk, ToolCallCompletedEvent):
-                    # Tool execution completed
-                    tool_name = chunk.tool.tool_name
-                    tool_info = tool_action_map.get(
-                        tool_name, {"icon": "✅", "action": f"Completed {tool_name}"}
+                    # Stream the response chunks using proper Agno event types
+                    async for chunk in response_stream:
+                        chunk_type = type(chunk).__name__
+
+                        if isinstance(chunk, RunStartedEvent):
+                            # Run started - agent is beginning to process
+                            logger.debug("Agent run started")
+
+                        elif isinstance(chunk, ToolCallStartedEvent):
+                            # Tool execution started
+                            tool_name = chunk.tool.tool_name
+                            tool_args = chunk.tool.tool_args
+                            tool_info = tool_action_map.get(
+                                tool_name, {"icon": "🔧", "action": f"Using {tool_name}"}
+                            )
+                            logger.info(f"Tool started: {tool_name}")
+                            yield f"data: {json.dumps({'type': 'tool_start', 'tool': tool_name, 'icon': tool_info['icon'], 'action': tool_info['action'], 'args': str(tool_args)[:200]})}\n\n"
+
+                        elif isinstance(chunk, ToolCallCompletedEvent):
+                            # Tool execution completed
+                            tool_name = chunk.tool.tool_name
+                            tool_info = tool_action_map.get(
+                                tool_name, {"icon": "✅", "action": f"Completed {tool_name}"}
+                            )
+                            # Truncate result for display
+                            result_preview = (
+                                str(chunk.tool.result)[:500] if chunk.tool.result else ""
+                            )
+                            logger.info(f"Tool completed: {tool_name}")
+                            yield f"data: {json.dumps({'type': 'tool_complete', 'tool': tool_name, 'icon': '✅', 'action': f'{tool_info["action"]} completed', 'result_preview': result_preview})}\n\n"
+
+                        elif isinstance(chunk, RunContentEvent):
+                            # Content chunk
+                            if chunk.content:
+                                content_yielded = True
+                                yield f"data: {json.dumps({'type': 'content', 'content': chunk.content})}\n\n"
+
+                        elif isinstance(chunk, RunContentCompletedEvent):
+                            # Content completed - no action needed
+                            pass
+
+                        elif isinstance(chunk, RunCompletedEvent):
+                            # Run completed
+                            logger.debug("Agent run completed event received")
+
+                        elif isinstance(chunk, RunErrorEvent):
+                            # Error occurred during run
+                            error_msg = getattr(chunk, "error", "Unknown error")
+                            logger.error(f"Agent run error: {error_msg}")
+                            yield f"data: {json.dumps({'type': 'error', 'error': str(error_msg)})}\n\n"
+
+                        elif isinstance(chunk, RunOutput):
+                            # Final run output - extract content if not already streamed
+                            logger.debug("Received RunOutput")
+                        else:
+                            # Log unknown event types for debugging
+                            logger.debug(f"Unhandled chunk type: {chunk_type}")
+
+                    # Stream completed successfully — break out of retry loop
+                    break
+
+                except Exception as e:
+                    if content_yielded or not _is_retryable(e) or attempt >= MAX_RETRIES - 1:
+                        raise
+                    wait = RETRY_BACKOFF[attempt] if attempt < len(RETRY_BACKOFF) else RETRY_BACKOFF[-1]
+                    logger.warning(
+                        "Stream attempt %d/%d failed (%s: %s), retrying in %ds",
+                        attempt + 1, MAX_RETRIES, type(e).__name__, str(e)[:200], wait,
                     )
-                    # Truncate result for display
-                    result_preview = (
-                        str(chunk.tool.result)[:500] if chunk.tool.result else ""
-                    )
-                    logger.info(f"Tool completed: {tool_name}")
-                    yield f"data: {json.dumps({'type': 'tool_complete', 'tool': tool_name, 'icon': '✅', 'action': f'{tool_info["action"]} completed', 'result_preview': result_preview})}\n\n"
-
-                elif isinstance(chunk, RunContentEvent):
-                    # Content chunk
-                    if chunk.content:
-                        yield f"data: {json.dumps({'type': 'content', 'content': chunk.content})}\n\n"
-
-                elif isinstance(chunk, RunContentCompletedEvent):
-                    # Content completed - no action needed
-                    pass
-
-                elif isinstance(chunk, RunCompletedEvent):
-                    # Run completed
-                    logger.debug("Agent run completed event received")
-
-                elif isinstance(chunk, RunErrorEvent):
-                    # Error occurred during run
-                    error_msg = getattr(chunk, "error", "Unknown error")
-                    logger.error(f"Agent run error: {error_msg}")
-                    yield f"data: {json.dumps({'type': 'error', 'error': str(error_msg)})}\n\n"
-
-                elif isinstance(chunk, RunOutput):
-                    # Final run output - extract content if not already streamed
-                    logger.debug("Received RunOutput")
-                else:
-                    # Log unknown event types for debugging
-                    logger.debug(f"Unhandled chunk type: {chunk_type}")
+                    await asyncio.sleep(wait)
 
             execution_time = time.time() - start_time
             logger.info(

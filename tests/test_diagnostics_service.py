@@ -166,7 +166,8 @@ async def test_diagnose_error_propagates(diagnostics_service_instance):
         side_effect=RuntimeError("LLM error")
     )
 
-    with pytest.raises(RuntimeError, match="LLM error"):
-        await diagnostics_service_instance.diagnose(
-            message="broken", listing_id="EQP-1", session_id="s1"
-        )
+    with patch("app.core.retry.asyncio.sleep", new_callable=AsyncMock):
+        with pytest.raises(RuntimeError, match="LLM error"):
+            await diagnostics_service_instance.diagnose(
+                message="broken", listing_id="EQP-1", session_id="s1"
+            )

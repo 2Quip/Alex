@@ -45,6 +45,17 @@ class DiagnosticsResponse(BaseModel):
     execution_time: float
 
 
+class TokenRequest(BaseModel):
+    identity: str
+    room: str
+    name: Optional[str] = None
+
+
+class TokenResponse(BaseModel):
+    token: str
+    url: str
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifespan context manager for startup and shutdown events"""
@@ -177,6 +188,26 @@ async def diagnostics(request: DiagnosticsRequest):
     except Exception as e:
         logger.error(f"Diagnostics error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/livekit/token", response_model=TokenResponse)
+async def livekit_token(request: TokenRequest):
+    """Generate a LiveKit access token for a participant to join a room."""
+    if not settings.LIVEKIT_URL or not settings.LIVEKIT_API_KEY or not settings.LIVEKIT_API_SECRET:
+        raise HTTPException(
+            status_code=503,
+            detail="LiveKit is not configured",
+        )
+
+    from livekit.api import AccessToken, VideoGrants
+
+    token = AccessToken(settings.LIVEKIT_API_KEY, settings.LIVEKIT_API_SECRET)
+    token.with_identity(request.identity)
+    token.with_grants(VideoGrants(room_join=True, room=request.room))
+    if request.name:
+        token.with_name(request.name)
+
+    return TokenResponse(token=token.to_jwt(), url=settings.LIVEKIT_URL)
 
 
 if __name__ == "__main__":
