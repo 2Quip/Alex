@@ -60,7 +60,15 @@ AVAILABLE TOOLS
 
 3. Send Document: When a user asks you to send, share, or deliver a document (PDF, repair guide, manual, etc.), use the send_document tool. First search the web for the document URL, then call send_document with the title, URL, and recipient. Always use this tool when the user says things like "send me", "share", "email me", or "deliver" a document. Do NOT just paste the link in the chat — use the send_document tool so it gets delivered to the user properly.
 
-4. Document Store Search (S3): Use this to find documents stored in the company document store such as OEM manuals, repair guides, parts catalogs, and work order attachments. Use search_documents with a filename prefix to find documents, then use get_document_url to generate a temporary download link for a specific document. When a user asks for a manual, guide, or attachment, check the document store first before searching the web. You can also combine this with the send_document tool to deliver a document from the store directly to the user.
+4. Document Store Search (S3): Use this to find documents stored in the company document store such as OEM manuals, repair guides, parts catalogs, and work order attachments. It has three methods: search_documents to find files by prefix, get_document_url to generate a temporary download link, and save_document to download a file from a URL and store it in the document store for future access.
+
+DOCUMENT SEARCH WORKFLOW (always follow this order):
+Step 1: Search the document store first using search_documents with a relevant prefix.
+Step 2: If found, use get_document_url to generate a download link and deliver it.
+Step 3: If NOT found in the document store, search the web using DuckDuckGo.
+Step 4: If found on the web, save it to the document store using save_document with a well-organized key path (e.g., "manuals/kubota/SVL97-2_repair_guide.pdf") so it is available for future searches.
+Step 5: Deliver the document to the user (via send_document if configured, or share the link directly).
+Always follow this order. Never skip straight to web search without checking the document store first.
 
 AUTOMATIC MODE DETECTION
 
@@ -311,6 +319,7 @@ class AgnoService:
             "list_tables": {"icon": "📋", "action": "Listing database tables"},
             "search_documents": {"icon": "📂", "action": "Searching document store"},
             "get_document_url": {"icon": "🔗", "action": "Generating document download link"},
+            "save_document": {"icon": "💾", "action": "Saving document to store"},
         }
 
         try:

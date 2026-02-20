@@ -1,7 +1,10 @@
 import logging
+import mimetypes
 from typing import Optional
+from urllib.parse import urlparse
 
 import boto3
+import httpx
 from botocore.exceptions import BotoCoreError, ClientError
 from agno.tools.toolkit import Toolkit
 
@@ -35,6 +38,7 @@ class S3SearchTool(Toolkit):
 
         self.register(self.search_documents)
         self.register(self.get_document_url)
+        self.register(self.save_document)
 
     def search_documents(self, prefix: str) -> str:
         """Search for documents in the S3 bucket by filename prefix.
@@ -114,3 +118,49 @@ class S3SearchTool(Toolkit):
         except BotoCoreError as e:
             logger.error("S3 get_document_url BotoCoreError: %s", e)
             return "Failed to get document URL: could not reach the document store."
+
+    def save_document(self, url: str, key: str) -> str:
+        """Download a document from a URL and save it to the S3 document store.
+
+        Use this tool after finding a document on the web that should be stored for
+        future access. This avoids repeated web searches for the same document.
+
+        Args:
+            url: The source URL to download the document from
+            key: The S3 key/path to store it under (e.g., "manuals/kubota/SVL97-2_repair_guide.pdf")
+
+        Returns:
+            A confirmation message with the stored key, or an error message.
+        """
+        try:
+            response = httpx.get(url, timeout=30.0, follow_redirects=True)
+            response.raise_for_status()
+        except httpx.TimeoutException:
+            logger.error("Timeout downloading document from %s", url)
+            return f"Failed to save document: timed out downloading from the source URL."
+        except httpx.HTTPError as e:
+            logger.error("HTTP error downloading document from %s: %s", url, e)
+            return f"Failed to save document: could not download from the source URL."
+
+        content_type = response.headers.get("content-type", "").split(";")[0].strip()
+        if not content_type:
+            content_type, _ = mimetypes.guess_type(key)
+            content_type = content_type or "application/octet-stream"
+
+        try:
+            self._s3.put_object(
+                Bucket=self.bucket_name,
+                Key=key,
+                Body=response.content,
+                ContentType=content_type,
+            )
+            size_kb = len(response.content) / 1024
+            logger.info("Saved document to S3: %s (%.1f KB)", key, size_kb)
+            return f"Document saved to the document store as '{key}' ({size_kb:.1f} KB). It will be available for future searches."
+        except ClientError as e:
+            error_code = e.response["Error"]["Code"]
+            logger.error("S3 save_document ClientError (%s): %s", error_code, e)
+            return f"Failed to save document: AWS error {error_code}."
+        except BotoCoreError as e:
+            logger.error("S3 save_document BotoCoreError: %s", e)
+            return "Failed to save document: could not reach the document store."

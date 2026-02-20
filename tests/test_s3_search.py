@@ -2,6 +2,7 @@
 
 from unittest.mock import MagicMock, patch
 
+import httpx
 import pytest
 from botocore.exceptions import BotoCoreError, ClientError
 
@@ -150,13 +151,14 @@ def test_get_document_url_botocore_error(tool):
 
 # --- init / registration tests ---
 
-def test_tool_registers_both_methods():
+def test_tool_registers_all_methods():
     with patch("app.tools.s3_search.boto3.client"):
         tool = S3SearchTool(bucket_name="test-bucket")
 
     func_names = [f.name for f in tool.functions.values()]
     assert "search_documents" in func_names
     assert "get_document_url" in func_names
+    assert "save_document" in func_names
 
 
 def test_init_with_explicit_credentials():
@@ -185,3 +187,103 @@ def test_init_without_credentials_uses_defaults():
         "s3",
         region_name="us-west-2",
     )
+
+
+# --- save_document tests ---
+
+def test_save_document_success(tool):
+    mock_response = MagicMock()
+    mock_response.content = b"PDF content here"
+    mock_response.headers = {"content-type": "application/pdf"}
+    mock_response.raise_for_status = MagicMock()
+
+    with patch("app.tools.s3_search.httpx.get", return_value=mock_response):
+        result = tool.save_document(
+            url="https://example.com/guide.pdf",
+            key="manuals/kubota/guide.pdf",
+        )
+
+    assert "saved to the document store" in result
+    assert "manuals/kubota/guide.pdf" in result
+    tool._s3.put_object.assert_called_once_with(
+        Bucket="test-bucket",
+        Key="manuals/kubota/guide.pdf",
+        Body=b"PDF content here",
+        ContentType="application/pdf",
+    )
+
+
+def test_save_document_guesses_content_type(tool):
+    mock_response = MagicMock()
+    mock_response.content = b"data"
+    mock_response.headers = {}
+    mock_response.raise_for_status = MagicMock()
+
+    with patch("app.tools.s3_search.httpx.get", return_value=mock_response):
+        result = tool.save_document(
+            url="https://example.com/file",
+            key="docs/report.pdf",
+        )
+
+    assert "saved to the document store" in result
+    call_kwargs = tool._s3.put_object.call_args.kwargs
+    assert call_kwargs["ContentType"] == "application/pdf"
+
+
+def test_save_document_download_timeout(tool):
+    with patch("app.tools.s3_search.httpx.get", side_effect=httpx.TimeoutException("timeout")):
+        result = tool.save_document(
+            url="https://example.com/slow.pdf",
+            key="manuals/slow.pdf",
+        )
+
+    assert "timed out" in result
+    tool._s3.put_object.assert_not_called()
+
+
+def test_save_document_download_http_error(tool):
+    with patch("app.tools.s3_search.httpx.get", side_effect=httpx.HTTPError("404")):
+        result = tool.save_document(
+            url="https://example.com/missing.pdf",
+            key="manuals/missing.pdf",
+        )
+
+    assert "could not download" in result
+    tool._s3.put_object.assert_not_called()
+
+
+def test_save_document_s3_upload_client_error(tool):
+    mock_response = MagicMock()
+    mock_response.content = b"data"
+    mock_response.headers = {"content-type": "application/pdf"}
+    mock_response.raise_for_status = MagicMock()
+
+    tool._s3.put_object.side_effect = ClientError(
+        {"Error": {"Code": "AccessDenied", "Message": "No write access"}}, "PutObject"
+    )
+
+    with patch("app.tools.s3_search.httpx.get", return_value=mock_response):
+        result = tool.save_document(
+            url="https://example.com/guide.pdf",
+            key="manuals/guide.pdf",
+        )
+
+    assert "Failed to save document" in result
+    assert "AccessDenied" in result
+
+
+def test_save_document_s3_upload_botocore_error(tool):
+    mock_response = MagicMock()
+    mock_response.content = b"data"
+    mock_response.headers = {"content-type": "application/pdf"}
+    mock_response.raise_for_status = MagicMock()
+
+    tool._s3.put_object.side_effect = BotoCoreError()
+
+    with patch("app.tools.s3_search.httpx.get", return_value=mock_response):
+        result = tool.save_document(
+            url="https://example.com/guide.pdf",
+            key="manuals/guide.pdf",
+        )
+
+    assert "could not reach the document store" in result

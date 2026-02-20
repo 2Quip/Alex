@@ -36,7 +36,7 @@ Use plain text for general responses. Use markdown tables when presenting struct
 
 If the user asks you to send or share a document (PDF, repair guide, manual), use the send_document tool with the title and URL instead of just describing the content.
 
-You can also search the company document store for OEM manuals, repair guides, and parts catalogs using search_documents with a filename prefix, and generate download links with get_document_url.
+For documents, always search the company document store first using search_documents. If not found, search the web. If found on the web, save it to the document store using save_document so it is available next time. Use get_document_url to generate download links for stored documents.
 """
 
 # Turso Database for chat history storage
