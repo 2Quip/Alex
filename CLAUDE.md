@@ -53,6 +53,7 @@ No linter is currently configured.
 
 ### Tools
 - `app/tools/send_document.py` — `SendDocumentTool` (Agno `Toolkit`) that POSTs document URLs to an external webhook. Used by all three agents (chat, diagnostics, voice) when `DOCUMENT_WEBHOOK_URL` is configured. Sends JSON payload with `title`, `url`, `recipient`, and `timestamp`. Handles timeout, HTTP errors, and connection failures gracefully.
+- `app/tools/s3_search.py` — `S3SearchTool` (Agno `Toolkit`) that searches for documents in an S3 bucket and generates presigned download URLs. Used by all three agents when `S3_BUCKET_NAME` is configured. Provides `search_documents(prefix)` to list objects by prefix (max 20) and `get_document_url(key)` to generate a temporary download link. Falls back to IAM/env credentials when `S3_ACCESS_KEY_ID` is not set.
 
 ### Voice Agent
 - `app/livekit_agent.py` — LiveKit voice pipeline: Silero VAD → AssemblyAI STT → Agno Agent (via LLMAdapter) → Cartesia TTS. Uses separate SQLite DB (`tmp/livekit_sessions.db`). Session persistence is disabled (causes pickle errors with coroutines).
@@ -62,6 +63,7 @@ No linter is currently configured.
 - Required env vars: `DATABASE_URL`, `DATABASE_AUTH_TOKEN`, `GROQ_API_KEY`, `OPENROUTER_API_KEY`, `OPENAI_API_KEY`
 - Optional env vars (voice): `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`, `ASSEMBLYAI_API_KEY`, `CARTESIA_API_KEY`, `DEEPGRAM_API_KEY`
 - Optional env vars (document sending): `DOCUMENT_WEBHOOK_URL` (when set, enables the `SendDocumentTool` on all agents)
+- Optional env vars (S3 document search): `S3_BUCKET_NAME` (when set, enables the `S3SearchTool` on all agents), `S3_REGION` (default `us-east-1`), `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `S3_PRESIGNED_URL_EXPIRY` (default `3600`)
 - Optional env vars (logging): `LOG_LEVEL` (default `INFO`), `LOG_FILE` (default `logs/agno_agent_api.log`)
 - See `.env.example` and `.env.livekit.example` for templates.
 

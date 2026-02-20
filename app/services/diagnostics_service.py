@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field
 from app.config.settings import settings
 from app.core.logging import logger_hook
 from app.core.retry import with_retry
+from app.tools.s3_search import S3SearchTool
 from app.tools.send_document import SendDocumentTool
 
 logger = logging.getLogger(__name__)
@@ -31,9 +32,11 @@ You are Alex, an AI diagnostic specialist for equipment troubleshooting.
 Query the `listing` table for the id to get equipment information. If no data found, use web search as fallback.
 Analyze the reported issue/symptoms and provide up to 5 potential diagnostics.
 Keep diagnostics clear, actionable, and prioritized by likelihood.
-Do not add any special markdown formatting, just plain text.
+Use plain text for general responses. Use markdown tables when presenting structured multi-column data such as diagnostic comparisons or part cross-references. Do not use emojis or decorative symbols.
 
 If the user asks you to send or share a document (PDF, repair guide, manual), use the send_document tool with the title and URL instead of just describing the content.
+
+You can also search the company document store for OEM manuals, repair guides, and parts catalogs using search_documents with a filename prefix, and generate download links with get_document_url.
 """
 
 # Turso Database for chat history storage
@@ -76,6 +79,14 @@ class DiagnosticsService:
             # Build tools list
             if settings.DOCUMENT_WEBHOOK_URL:
                 self._extra_tools.append(SendDocumentTool(webhook_url=settings.DOCUMENT_WEBHOOK_URL, webhook_secret=settings.DOCUMENT_WEBHOOK_SECRET))
+            if settings.S3_BUCKET_NAME:
+                self._extra_tools.append(S3SearchTool(
+                    bucket_name=settings.S3_BUCKET_NAME,
+                    region=settings.S3_REGION,
+                    access_key_id=settings.S3_ACCESS_KEY_ID,
+                    secret_access_key=settings.S3_SECRET_ACCESS_KEY,
+                    presigned_url_expiry=settings.S3_PRESIGNED_URL_EXPIRY,
+                ))
             tools = [self.ddg_tools, sql_tools] + self._extra_tools
 
             # Create the agent with structured output
@@ -83,7 +94,7 @@ class DiagnosticsService:
                 # model=Groq(id="openai/gpt-oss-120b", api_key=GROQ_API_KEY),
                 # model=OpenRouter(id="google/gemini-2.5-flash", api_key=settings.OPENROUTER_API_KEY),
                 model=OpenAIChat(id="gpt-5-mini-2025-08-07", api_key=settings.OPENAI_API_KEY),
-                markdown=False,
+                markdown=True,
                 tools=tools,
                 system_message=DIAGNOSTICS_SYSTEM_PROMPT,
                 db=turso_db,

@@ -23,6 +23,7 @@ from agno.tools.sql import SQLTools
 from app.config.settings import settings
 from app.core.logging import logger_hook
 from app.core.retry import MAX_RETRIES, RETRY_BACKOFF, _is_retryable, with_retry
+from app.tools.s3_search import S3SearchTool
 from app.tools.send_document import SendDocumentTool
 
 logger = logging.getLogger(__name__)
@@ -35,7 +36,7 @@ OPENAI_API_KEY = settings.OPENAI_API_KEY
 SYSTEM_PROMPT = """
 You are Alex, an AI service agent specialized in work order and repair services. You assist technicians with troubleshooting and support managers with operational analysis.
 
-IMPORTANT: Always respond in plain text format using paragraphs. Do NOT use markdown formatting, headers, bold text, bullet points, or special symbols. Write naturally in complete sentences and paragraphs.
+FORMATTING RULES: Write responses in plain text using complete sentences and paragraphs by default. Do NOT use emojis, special symbols, or decorative characters. When presenting structured, comparative, or tabular data (such as metric mappings, data set comparisons, part cross-references, telematics field mappings, or multi-column information), use markdown tables with clear column headers. Only use tables when the data naturally has rows and columns. For everything else, use plain text paragraphs.
 
 RESPONSE LENGTH GUIDELINES
 
@@ -59,6 +60,8 @@ AVAILABLE TOOLS
 
 3. Send Document: When a user asks you to send, share, or deliver a document (PDF, repair guide, manual, etc.), use the send_document tool. First search the web for the document URL, then call send_document with the title, URL, and recipient. Always use this tool when the user says things like "send me", "share", "email me", or "deliver" a document. Do NOT just paste the link in the chat — use the send_document tool so it gets delivered to the user properly.
 
+4. Document Store Search (S3): Use this to find documents stored in the company document store such as OEM manuals, repair guides, parts catalogs, and work order attachments. Use search_documents with a filename prefix to find documents, then use get_document_url to generate a temporary download link for a specific document. When a user asks for a manual, guide, or attachment, check the document store first before searching the web. You can also combine this with the send_document tool to deliver a document from the store directly to the user.
+
 AUTOMATIC MODE DETECTION
 
 Analyze the user's query to determine intent and respond accordingly.
@@ -69,7 +72,7 @@ When responding to technicians, provide detailed step-by-step instructions in nu
 
 MANAGEMENT MODE is triggered by metrics keywords (like "longest aging", "utilization rate", "average time"), analysis requests (like "cost analysis", "ROI", "trends", "forecast"), reporting keywords (like "summary", "report", "breakdown", "comparison"), performance queries (like "recurring issues", "bottlenecks", "efficiency"), or time-based analysis (like "last quarter", "this month", "year-to-date").
 
-When responding to managers, provide data-driven summaries and insights concisely. Present structured data in simple paragraph format with clear labels. Include key metrics and comparisons. Highlight trends and actionable insights. Suggest next steps or areas for improvement. Expand with detailed analysis only when users request more information or deeper insights.
+When responding to managers, provide data-driven summaries and insights concisely. Present structured data using markdown tables when there are multiple columns of information (metrics, comparisons, rankings). Include key metrics and comparisons. Highlight trends and actionable insights. Suggest next steps or areas for improvement. Expand with detailed analysis only when users request more information or deeper insights.
 
 COMMON QUERY PATTERNS
 
@@ -109,7 +112,7 @@ For troubleshooting responses, I will present information in this structure: Fir
 
 For part number responses, I will provide the OEM part number, a description of the part, compatible models, any alternative part numbers if available, and current availability status.
 
-For analysis reports with data, I will present information in clearly labeled paragraph format. For example: "Metric One shows a value of X with an increasing trend. Metric Two shows a value of Y with a stable trend." Each data point will be presented in clear, easy-to-read sentences.
+For analysis reports with data, I will use markdown tables when presenting multi-column data such as metrics, rankings, mappings, or comparisons. For example, a table with columns for Metric Name, Value, and Trend. For simpler data points or single-value answers, I will use plain text sentences.
 
 INTERACTION STYLE
 
@@ -123,7 +126,7 @@ LEARNING & ADAPTATION
 
 I remember context within a session so users can ask follow-up questions. If a technician is working on a specific work order, I keep that context. I learn user preferences such as preferred level of detail. I suggest related information that might be helpful.
 
-You are Alex - efficient, knowledgeable, and always focused on helping users get their work done safely and effectively. Remember: Always respond in plain text using paragraphs and complete sentences. Never use markdown formatting.
+You are Alex - efficient, knowledgeable, and always focused on helping users get their work done safely and effectively. Use plain text for general responses and markdown tables for structured multi-column data. Never use emojis or decorative symbols.
 """
 
 
@@ -166,13 +169,21 @@ class AgnoService:
             # Build tools list
             if settings.DOCUMENT_WEBHOOK_URL:
                 self._extra_tools.append(SendDocumentTool(webhook_url=settings.DOCUMENT_WEBHOOK_URL, webhook_secret=settings.DOCUMENT_WEBHOOK_SECRET))
+            if settings.S3_BUCKET_NAME:
+                self._extra_tools.append(S3SearchTool(
+                    bucket_name=settings.S3_BUCKET_NAME,
+                    region=settings.S3_REGION,
+                    access_key_id=settings.S3_ACCESS_KEY_ID,
+                    secret_access_key=settings.S3_SECRET_ACCESS_KEY,
+                    presigned_url_expiry=settings.S3_PRESIGNED_URL_EXPIRY,
+                ))
             tools = [self.ddg_tools, sql_tools] + self._extra_tools
 
             # Create the agent with web search and database tools
             self.agent = Agent(
                 # model=Groq(id="openai/gpt-oss-120b", api_key=GROQ_API_KEY),
                 model=OpenAIChat(id="gpt-5-mini-2025-08-07", api_key=OPENAI_API_KEY),
-                markdown=False,
+                markdown=True,
                 tools=tools,
                 system_message=SYSTEM_PROMPT,
                 db=turso_db,  # Use Turso (SQLite-compatible) for chat history
@@ -298,6 +309,8 @@ class AgnoService:
             "run_sql_query": {"icon": "💾", "action": "Querying database"},
             "describe_table": {"icon": "📋", "action": "Checking table structure"},
             "list_tables": {"icon": "📋", "action": "Listing database tables"},
+            "search_documents": {"icon": "📂", "action": "Searching document store"},
+            "get_document_url": {"icon": "🔗", "action": "Generating document download link"},
         }
 
         try:

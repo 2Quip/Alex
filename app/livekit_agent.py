@@ -49,6 +49,7 @@ from livekit.plugins.turn_detector.multilingual import MultilingualModel
 from app.services.livekit_agno_plugin import LLMAdapter
 from app.config.settings import settings
 from app.core.logging import setup_logging
+from app.tools.s3_search import S3SearchTool
 from app.tools.send_document import SendDocumentTool
 from app.voice_health import health, start_health_server
 
@@ -76,7 +77,7 @@ VOICE INTERACTION GUIDELINES:
 Keep responses concise and conversational. Use natural speech patterns and contractions like I'm, you'll, let's, and so on. Avoid technical jargon when possible. When using tools, briefly explain what you're doing. If you don't know something, say so honestly. Be friendly, helpful, and direct.
 
 YOUR CAPABILITIES:
-You can search the web for OEM documentation, part numbers, troubleshooting guides, and current information. You can query work order history, equipment data, parts inventory, and operational metrics from the database in read-only mode. When a user asks you to send or share a document, PDF, repair guide, or manual, use the send_document tool. Search for the document URL first, then call send_document with the title and URL. Always use this tool when the user says "send me", "share", or "deliver" a document instead of just reading the content aloud.
+You can search the web for OEM documentation, part numbers, troubleshooting guides, and current information. You can query work order history, equipment data, parts inventory, and operational metrics from the database in read-only mode. When a user asks you to send or share a document, PDF, repair guide, or manual, use the send_document tool. Search for the document URL first, then call send_document with the title and URL. Always use this tool when the user says "send me", "share", or "deliver" a document instead of just reading the content aloud. You can also search the company document store for OEM manuals, repair guides, parts catalogs, and attachments using search_documents, then generate a download link with get_document_url. Check the document store first when a user asks for a specific manual or guide.
 
 RESPONSE STYLE:
 For simple questions, give direct brief answers. For troubleshooting, explain the issue then walk through two or three key steps conversationally. For data queries, summarize the key findings in natural sentences. Always acknowledge when you're searching or querying.
@@ -109,6 +110,14 @@ def create_agno_agent(session_id: str | None = None) -> AgnoAgent:
     tools = [ddg_tools, sql_tools]
     if settings.DOCUMENT_WEBHOOK_URL:
         tools.append(SendDocumentTool(webhook_url=settings.DOCUMENT_WEBHOOK_URL, webhook_secret=settings.DOCUMENT_WEBHOOK_SECRET))
+    if settings.S3_BUCKET_NAME:
+        tools.append(S3SearchTool(
+            bucket_name=settings.S3_BUCKET_NAME,
+            region=settings.S3_REGION,
+            access_key_id=settings.S3_ACCESS_KEY_ID,
+            secret_access_key=settings.S3_SECRET_ACCESS_KEY,
+            presigned_url_expiry=settings.S3_PRESIGNED_URL_EXPIRY,
+        ))
 
     # Create agent without db persistence to avoid pickle errors
     # LiveKit's AgentSession maintains the conversation context instead

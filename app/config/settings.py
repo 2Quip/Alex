@@ -29,6 +29,13 @@ class Settings(BaseSettings):
     DOCUMENT_WEBHOOK_URL: Optional[str] = None
     DOCUMENT_WEBHOOK_SECRET: Optional[str] = None
 
+    # S3 Document Search (optional - for searching documents in S3)
+    S3_BUCKET_NAME: Optional[str] = None
+    S3_REGION: Optional[str] = "us-east-1"
+    S3_ACCESS_KEY_ID: Optional[str] = None
+    S3_SECRET_ACCESS_KEY: Optional[str] = None
+    S3_PRESIGNED_URL_EXPIRY: int = 3600
+
     # Logging
     LOG_LEVEL: str = "INFO"
     LOG_FILE: str = "logs/agno_agent_api.log"
