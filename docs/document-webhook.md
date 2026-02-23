@@ -18,7 +18,7 @@ Add these to your `.env` file:
 # Required - your backend endpoint that receives document payloads
 DOCUMENT_WEBHOOK_URL=https://your-backend.com/api/document-webhook
 
-# Optional - bearer token for authenticating webhook requests
+# Required - bearer token for authenticating webhook requests
 DOCUMENT_WEBHOOK_SECRET=your-secret-key-here
 ```
 
