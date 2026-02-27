@@ -21,22 +21,64 @@ from app.tools.send_document import SendDocumentTool
 
 logger = logging.getLogger(__name__)
 
+
+def _parse_diagnostics(text: str) -> list[dict]:
+    """Parse structured diagnostics into dicts with likelihood, diagnosis, cause, fix.
+
+    Expected format per line:
+        1. [High] Diagnosis title | Cause: brief cause | Fix: brief fix
+
+    Falls back to plain string if a line doesn't match the pattern.
+    """
+    import re
+    items = re.split(r"\n\s*\d+\.\s+", "\n" + text.strip())
+    results = []
+    for item in items:
+        item = item.strip()
+        if not item:
+            continue
+
+        # Try to parse structured format: [Likelihood] Title | Cause: ... | Fix: ...
+        m = re.match(
+            r"\[(?P<likelihood>High|Medium|Low)\]\s*(?P<diagnosis>.+?)(?:\s*\|\s*Cause:\s*(?P<cause>.+?))?(?:\s*\|\s*Fix:\s*(?P<fix>.+?))?$",
+            item,
+            re.IGNORECASE | re.DOTALL,
+        )
+        if m:
+            results.append({
+                "likelihood": m.group("likelihood").capitalize(),
+                "diagnosis": m.group("diagnosis").strip(),
+                "cause": (m.group("cause") or "").strip(),
+                "fix": (m.group("fix") or "").strip(),
+            })
+        else:
+            # Fallback: return as plain diagnosis
+            results.append({
+                "likelihood": "",
+                "diagnosis": item,
+                "cause": "",
+                "fix": "",
+            })
+
+        if len(results) >= 5:
+            break
+    return results
+
 # Database configuration
 ENGINE = settings.db_engine
 GROQ_API_KEY = settings.GROQ_API_KEY
 
 # System prompt for the diagnostics agent
 DIAGNOSTICS_SYSTEM_PROMPT = """
-You are Alex, an AI diagnostic specialist. Query the listing table for the id. Provide up to 5 diagnostics prioritized by likelihood. Each diagnostic must be one to two sentences max. Do not use web search unless the database has zero relevant data. No emojis.
+You are Alex, an AI diagnostic specialist. Query the listing table for the id. Provide up to 5 diagnostics prioritized by likelihood. Do not use web search unless the database has zero relevant data. No emojis.
+
+Use this exact format for each diagnostic, one per line:
+1. [High] Diagnosis title | Cause: brief cause | Fix: brief fix
+2. [Medium] Diagnosis title | Cause: brief cause | Fix: brief fix
+
+Likelihood must be High, Medium, or Low. Keep each line to one sentence per field. No intro, no summary.
 """
 
-# Turso Database for chat history storage
-turso_db = SqliteDb(db_file="tmp/data.db")
-
-
-class DiagnosticsOutput(BaseModel):
-    """Structured output for diagnostics"""
-    diagnostics: List[str] = Field(..., max_length=5, description="List of potential diagnoses (max 5)")
 
 class DiagnosticsService:
     """Service for handling equipment diagnostics with structured output"""
@@ -80,15 +122,13 @@ class DiagnosticsService:
                 ))
             tools = [self.ddg_tools, sql_tools] + self._extra_tools
 
-            # Create the agent with structured output
-            # Groq for fast inference (5-10x faster than OpenAI)
+            # Create the agent — Groq for fast inference
             self.agent = Agent(
                 model=Groq(id="llama-3.3-70b-versatile", api_key=GROQ_API_KEY),
-                markdown=True,
+                markdown=False,
                 tools=tools,
                 system_message=DIAGNOSTICS_SYSTEM_PROMPT,
-                add_history_to_context=False,  # Diagnostics are stateless
-                output_schema=DiagnosticsOutput,
+                add_history_to_context=False,
                 tool_hooks=[logger_hook],
             )
             
@@ -155,20 +195,9 @@ class DiagnosticsService:
             
             execution_time = time.time() - start_time
 
-            # The response should be a DiagnosticsOutput object due to response_model
-            if hasattr(response, 'content'):
-                # If content is already structured (Pydantic model)
-                if isinstance(response.content, DiagnosticsOutput):
-                    diagnostics_data = response.content.model_dump()
-                else:
-                    # Parse if it's still a string
-                    import json
-                    try:
-                        diagnostics_data = json.loads(response.content)
-                    except:
-                        diagnostics_data = {"diagnostics": []}
-            else:
-                diagnostics_data = {"diagnostics": []}
+            # Parse numbered list from plain text response
+            raw = str(response.content) if response.content else ""
+            diagnostics_list = _parse_diagnostics(raw)
 
             logger.info(
                 f"Diagnostics generated for listing {listing_id}, session {session_id} "
@@ -176,7 +205,7 @@ class DiagnosticsService:
             )
 
             return {
-                "diagnostics": diagnostics_data.get("diagnostics", []),
+                "diagnostics": diagnostics_list,
                 "listing_id": listing_id,
                 "session_id": session_id,
                 "execution_time": round(execution_time, 3),
