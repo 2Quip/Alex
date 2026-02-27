@@ -168,8 +168,8 @@ class AgnoService:
         try:
             # Initialize DuckDuckGo tools once (these don't expire)
             self.ddg_tools = DuckDuckGoTools(
-                timeout=20,
-                fixed_max_results=10,
+                timeout=10,
+                fixed_max_results=5,
             )
             # Create fresh SQL tools instance for initial setup
             sql_tools = self._create_sql_tools()

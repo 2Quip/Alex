@@ -118,11 +118,50 @@ class AgnoStream(llm.LLMStream):
                     user_id=self._user_id,
                 )
 
+                # Sentence buffer: accumulate chunks and release on sentence
+                # boundaries so _sanitize_for_tts can match multi-token
+                # patterns (reasoning sentences, role tokens, tool routing).
+                buffer = ""
+
                 async for event in response_stream:
-                    chunk = _to_chat_chunk(event)
-                    if chunk:
+                    raw = _extract_content(event)
+                    if not raw:
+                        continue
+
+                    buffer += raw
+
+                    # Flush complete sentences from the buffer
+                    while True:
+                        idx = _sentence_boundary(buffer)
+                        if idx == -1:
+                            break
+                        sentence = buffer[:idx]
+                        buffer = buffer[idx:]
+                        cleaned = _sanitize_for_tts(sentence)
+                        if cleaned and cleaned.strip():
+                            content_sent = True
+                            self._event_ch.send_nowait(
+                                llm.ChatChunk(
+                                    id="agno",
+                                    delta=llm.ChoiceDelta(
+                                        role="assistant", content=cleaned
+                                    ),
+                                )
+                            )
+
+                # Flush remaining buffer
+                if buffer.strip():
+                    cleaned = _sanitize_for_tts(buffer)
+                    if cleaned and cleaned.strip():
                         content_sent = True
-                        self._event_ch.send_nowait(chunk)
+                        self._event_ch.send_nowait(
+                            llm.ChatChunk(
+                                id="agno",
+                                delta=llm.ChoiceDelta(
+                                    role="assistant", content=cleaned
+                                ),
+                            )
+                        )
 
                 # Stream completed successfully
                 return
@@ -177,17 +216,129 @@ class AgnoStream(llm.LLMStream):
         return None
 
 
+# =============================================================================
+# Sentence boundary detection
+# =============================================================================
+
+def _sentence_boundary(text: str) -> int:
+    """Return index of the first sentence boundary, or -1 if none found.
+
+    A sentence boundary is after '.', '!', '?', or a newline, provided there
+    is at least one character of content before it.
+    """
+    for i, ch in enumerate(text):
+        if ch in ".!?\n" and i > 0:
+            # Return position right after the boundary character
+            return i + 1
+    return -1
+
+
+# =============================================================================
+# Content extraction
+# =============================================================================
+
+def _extract_content(event: Any) -> str | None:
+    """Pull raw text content from an Agno event, or None."""
+    if isinstance(event, RunContentEvent):
+        return event.content
+    if isinstance(event, RunOutput) and event.content:
+        return str(event.content) if not isinstance(event.content, str) else event.content
+    return None
+
+
+# =============================================================================
+# TTS sanitization
+# =============================================================================
+
+# Repeated role tokens the model sometimes emits (e.g. "assistantassistantassistant")
+_ROLE_TOKEN_RE = re.compile(r"(?:assistant|user|system){2,}", re.IGNORECASE)
+# Single standalone role token that is the entire chunk
+_LONE_ROLE_RE = re.compile(r"^(?:assistant|user|system)$", re.IGNORECASE)
+
+# Model reasoning / internal tags (opening, closing, or self-closing)
+_REASONING_TAG_RE = re.compile(
+    r"</?(?:analysis|assistantcommentary|assistantfinal|thinking|thought|reasoning|internal|scratchpad)[^>]*>",
+    re.IGNORECASE,
+)
+
+# Content between reasoning tags (multiline)
+_REASONING_BLOCK_RE = re.compile(
+    r"<(?:analysis|assistantcommentary|assistantfinal|thinking|thought|reasoning|internal|scratchpad)>"
+    r"[\s\S]*?"
+    r"</(?:analysis|assistantcommentary|assistantfinal|thinking|thought|reasoning|internal|scratchpad)>",
+    re.IGNORECASE,
+)
+
+# Tool-call routing fragments (e.g. "to=functions.run_sql_query", "functions.run_sql_query to=assistant")
+_TOOL_ROUTING_RE = re.compile(
+    r"(?:to=functions\.\S+|functions\.\S+\s*to=\S*)", re.IGNORECASE
+)
+
+# "json" immediately before a brace (e.g. 'json{"query":...')
+_JSON_PREFIX_RE = re.compile(r"json\s*\{[^}]{0,500}\}", re.IGNORECASE)
+
+# Raw JSON blobs
+_JSON_BLOB_RE = re.compile(r"\{[^}]{0,500}\}")
+
+# Internal reasoning sentences — lines that are clearly the model thinking,
+# not talking to the user. Matched case-insensitively.
+_REASONING_SENTENCE_PATTERNS = [
+    r"(?:^|\. )We (?:need|still|haven't|should|must|could) ",
+    r"(?:^|\. )Let'?s (?:try|describe|check|see|look|query|get|use|handle)",
+    r"(?:^|\. )Probably ",
+    r"(?:^|\. )(?:It )?might (?:have|be|return|need)",
+    r"(?:^|\. )Error running ",
+    r"(?:^|\. )(?:The )?(?:stream|query|function|tool|result|schema|table|column)s? (?:error|return|fail|might|maybe)",
+    r"(?:^|\. )Not shown\b",
+    r"(?:^|\. )Not captured\b",
+    r"(?:^|\. )Need to handle ",
+]
+_REASONING_SENTENCE_RE = re.compile(
+    "|".join(_REASONING_SENTENCE_PATTERNS), re.IGNORECASE
+)
+
+# SQL query fragments that leak
+_SQL_LEAK_RE = re.compile(
+    r"SELECT\s+\w+.*?FROM\s+\w+", re.IGNORECASE
+)
+
+
 def _sanitize_for_tts(text: str) -> str:
-    """Strip markdown, reasoning tokens, and special characters so TTS reads natural speech."""
-    # Strip model reasoning / internal tags that should never be spoken
-    text = re.sub(r"</?(?:analysis|assistantcommentary|assistantfinal)>", "", text)
-    # Strip tool-call routing fragments (e.g. "to=functions.run_sql_query")
-    text = re.sub(r"to=functions\.\S+", "", text)
-    # Strip raw JSON blobs that sometimes leak (e.g. {"name": ...})
-    text = re.sub(r"\{[^}]{0,500}\}", "", text)
+    """Strip markdown, reasoning tokens, tool metadata, and special characters
+    so TTS reads natural speech only."""
+
+    # --- Phase 1: Strip model internals ---
+
+    # Remove repeated role tokens (assistantassistantassistant...)
+    text = _ROLE_TOKEN_RE.sub("", text)
+    # Remove lone role tokens
+    if _LONE_ROLE_RE.match(text.strip()):
+        return ""
+
+    # Remove reasoning blocks (content between tags)
+    text = _REASONING_BLOCK_RE.sub("", text)
+    # Remove remaining reasoning tags
+    text = _REASONING_TAG_RE.sub("", text)
+
+    # Remove tool-call routing
+    text = _TOOL_ROUTING_RE.sub("", text)
+
+    # Remove "json{...}" patterns
+    text = _JSON_PREFIX_RE.sub("", text)
+    # Remove raw JSON blobs
+    text = _JSON_BLOB_RE.sub("", text)
+
+    # Remove SQL query fragments
+    text = _SQL_LEAK_RE.sub("", text)
+
+    # Remove reasoning sentences (model thinking aloud)
+    text = _REASONING_SENTENCE_RE.sub("", text)
+
+    # --- Phase 2: Strip markdown formatting ---
+
     # Remove markdown headers (### Header)
     text = re.sub(r"#{1,6}\s*", "", text)
-    # Remove bold/italic markers (**bold**, *italic*, __bold__, _italic_)
+    # Remove bold/italic markers
     text = re.sub(r"\*{1,3}(.*?)\*{1,3}", r"\1", text)
     text = re.sub(r"_{1,3}(.*?)_{1,3}", r"\1", text)
     # Remove inline code backticks
@@ -196,41 +347,17 @@ def _sanitize_for_tts(text: str) -> str:
     text = re.sub(r"```[\s\S]*?```", "", text)
     # Convert markdown links [text](url) to just the text
     text = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", text)
-    # Remove bullet point markers (-, *, •) at start of lines
+    # Remove bullet point markers
     text = re.sub(r"(?m)^\s*[-*•]\s+", "", text)
-    # Remove numbered list markers (1. 2. etc.) at start of lines
+    # Remove numbered list markers
     text = re.sub(r"(?m)^\s*\d+\.\s+", "", text)
-    # Remove horizontal rules (---, ***, ___)
+    # Remove horizontal rules
     text = re.sub(r"(?m)^[-*_]{3,}\s*$", "", text)
-    # Collapse multiple newlines into a single space
+
+    # --- Phase 3: Whitespace cleanup ---
+
     text = re.sub(r"\n{2,}", " ", text)
-    # Replace single newlines with space
     text = re.sub(r"\n", " ", text)
-    # Collapse multiple spaces
     text = re.sub(r" {2,}", " ", text)
-    return text
 
-
-def _to_chat_chunk(event: Any) -> llm.ChatChunk | None:
-    """Convert Agno event to LiveKit ChatChunk."""
-    content = None
-
-    if isinstance(event, RunContentEvent):
-        content = event.content
-    elif isinstance(event, RunOutput) and event.content:
-        content = (
-            str(event.content) if not isinstance(event.content, str) else event.content
-        )
-    # No catch-all hasattr — only RunContentEvent and RunOutput carry
-    # content meant for the user.  Other events (tool calls, metrics,
-    # etc.) are silently dropped to prevent tool metadata leaking to TTS.
-
-    if content:
-        content = _sanitize_for_tts(content)
-
-    if content:
-        return llm.ChatChunk(
-            id="agno",
-            delta=llm.ChoiceDelta(role="assistant", content=content),
-        )
-    return None
+    return text.strip()
