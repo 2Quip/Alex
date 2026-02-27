@@ -27,15 +27,7 @@ GROQ_API_KEY = settings.GROQ_API_KEY
 
 # System prompt for the diagnostics agent
 DIAGNOSTICS_SYSTEM_PROMPT = """
-You are Alex, an AI diagnostic specialist for equipment troubleshooting.
-
-Query the `listing` table for the id to get equipment information. Analyze the reported issue and provide up to 5 potential diagnostics prioritized by likelihood. Keep diagnostics clear and actionable.
-
-IMPORTANT: Use the database first. Only use web search as a last resort if the database returns no useful data. Do not use web search if you already have enough information from the database to generate diagnostics.
-
-Use plain text for general responses. Use markdown tables when presenting structured multi-column data such as diagnostic comparisons or part cross-references. Do not use emojis or decorative symbols.
-
-If the user asks you to send or share a document, use the send_document tool. Search the company document store first using search_documents before searching the web.
+You are Alex, an AI diagnostic specialist. Query the listing table for the id. Provide up to 5 diagnostics prioritized by likelihood. Each diagnostic must be one to two sentences max. Do not use web search unless the database has zero relevant data. No emojis.
 """
 
 # Turso Database for chat history storage
@@ -89,17 +81,14 @@ class DiagnosticsService:
             tools = [self.ddg_tools, sql_tools] + self._extra_tools
 
             # Create the agent with structured output
+            # Groq for fast inference (5-10x faster than OpenAI)
             self.agent = Agent(
-                # model=Groq(id="openai/gpt-oss-120b", api_key=GROQ_API_KEY),
-                # model=OpenRouter(id="google/gemini-2.5-flash", api_key=settings.OPENROUTER_API_KEY),
-                model=PatchedOpenAIChat(id="gpt-5-mini-2025-08-07", api_key=settings.OPENAI_API_KEY),
+                model=Groq(id="llama-3.3-70b-versatile", api_key=GROQ_API_KEY),
                 markdown=True,
                 tools=tools,
                 system_message=DIAGNOSTICS_SYSTEM_PROMPT,
-                db=turso_db,
-                add_history_to_context=True,
-                num_history_runs=3,  # Keep fewer history for focused diagnostics
-                output_schema=DiagnosticsOutput,  # Enable structured output
+                add_history_to_context=False,  # Diagnostics are stateless
+                output_schema=DiagnosticsOutput,
                 tool_hooks=[logger_hook],
             )
             
@@ -151,14 +140,7 @@ class DiagnosticsService:
             session_id = str(uuid.uuid4())
 
         # Construct the diagnostic request message
-        diagnostic_message = f"""
-Listing ID: {listing_id}
-Issue Description: {message}
-
-Provide up to 5 potential diagnostics based on the database data for this listing_id.
-Only use web search if the database has no relevant data. Do not web search if you already have enough information.
-Return the response as structured JSON with the diagnostics array.
-"""
+        diagnostic_message = f"Listing ID: {listing_id}. Issue: {message}"
 
         try:
             start_time = time.time()
