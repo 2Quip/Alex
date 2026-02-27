@@ -6,7 +6,51 @@ import pytest
 
 from agno.run.agent import RunOutput
 
-from app.services.diagnostics_service import DiagnosticsOutput, DiagnosticsService
+from app.services.diagnostics_service import DiagnosticsService, _parse_diagnostics
+
+
+# --- _parse_diagnostics ---
+
+
+def test_parse_diagnostics_blank_line_split():
+    text = "Most likely: Bad battery.\n\nPossible: Faulty starter."
+    result = _parse_diagnostics(text)
+    assert result == ["Most likely: Bad battery.", "Possible: Faulty starter."]
+
+
+def test_parse_diagnostics_numbered_split():
+    text = "1. Bad battery cause and fix.\n2. Faulty starter cause and fix."
+    result = _parse_diagnostics(text)
+    assert result == ["Bad battery cause and fix.", "Faulty starter cause and fix."]
+
+
+def test_parse_diagnostics_max_five():
+    text = "\n\n".join(f"Diag {i}" for i in range(10))
+    result = _parse_diagnostics(text)
+    assert len(result) == 5
+
+
+def test_parse_diagnostics_filters_json():
+    text = '{"error": "something"}\n\nActual diagnostic here.'
+    result = _parse_diagnostics(text)
+    assert result == ["Actual diagnostic here."]
+
+
+def test_parse_diagnostics_filters_errors():
+    text = "Error running tool\n\nMost likely: Bad battery."
+    result = _parse_diagnostics(text)
+    assert result == ["Most likely: Bad battery."]
+
+
+def test_parse_diagnostics_filters_tool_use_failed():
+    text = "tool_use_failed: timeout\n\nPossible: Overheating."
+    result = _parse_diagnostics(text)
+    assert result == ["Possible: Overheating."]
+
+
+def test_parse_diagnostics_empty():
+    assert _parse_diagnostics("") == []
+    assert _parse_diagnostics("   ") == []
 
 
 # --- Initialization ---
@@ -51,58 +95,30 @@ async def test_cleanup(diagnostics_service_instance):
 
 
 @pytest.mark.asyncio
-async def test_diagnose_with_pydantic_output(diagnostics_service_instance):
-    output = DiagnosticsOutput(diagnostics=["Bad battery", "Faulty starter"])
+async def test_diagnose_with_plain_text(diagnostics_service_instance):
     diagnostics_service_instance.agent.arun = AsyncMock(
-        return_value=RunOutput(content=output)
+        return_value=RunOutput(
+            content="Most likely: Bad battery.\n\nPossible: Faulty starter."
+        )
     )
 
     result = await diagnostics_service_instance.diagnose(
         message="won't start", listing_id="EQP-1", session_id="s1"
     )
 
-    assert result["diagnostics"] == ["Bad battery", "Faulty starter"]
+    assert result["diagnostics"] == [
+        "Most likely: Bad battery.",
+        "Possible: Faulty starter.",
+    ]
     assert result["listing_id"] == "EQP-1"
     assert result["session_id"] == "s1"
     assert isinstance(result["execution_time"], float)
 
 
 @pytest.mark.asyncio
-async def test_diagnose_with_json_string(diagnostics_service_instance):
-    diagnostics_service_instance.agent.arun = AsyncMock(
-        return_value=RunOutput(
-            content='{"diagnostics": ["Low oil", "Filter clogged"]}'
-        )
-    )
-
-    result = await diagnostics_service_instance.diagnose(
-        message="overheating", listing_id="EQP-2", session_id="s2"
-    )
-
-    assert result["diagnostics"] == ["Low oil", "Filter clogged"]
-
-
-@pytest.mark.asyncio
-async def test_diagnose_with_unparseable_content(diagnostics_service_instance):
-    diagnostics_service_instance.agent.arun = AsyncMock(
-        return_value=RunOutput(content="not json at all")
-    )
-
-    result = await diagnostics_service_instance.diagnose(
-        message="noise", listing_id="EQP-3", session_id="s3"
-    )
-
-    assert result["diagnostics"] == []
-
-
-@pytest.mark.asyncio
 async def test_diagnose_with_no_content(diagnostics_service_instance):
-    diagnostics_service_instance.agent.arun = AsyncMock(
-        return_value=MagicMock(spec=[], content=None)  # no 'content' attr via spec=[]
-    )
-    # Patch hasattr behavior — RunOutput without content
     mock_response = MagicMock()
-    del mock_response.content  # hasattr(response, 'content') → False
+    mock_response.content = None
     diagnostics_service_instance.agent.arun = AsyncMock(return_value=mock_response)
 
     result = await diagnostics_service_instance.diagnose(
@@ -114,9 +130,8 @@ async def test_diagnose_with_no_content(diagnostics_service_instance):
 
 @pytest.mark.asyncio
 async def test_diagnose_generates_session_id(diagnostics_service_instance):
-    output = DiagnosticsOutput(diagnostics=["Issue 1"])
     diagnostics_service_instance.agent.arun = AsyncMock(
-        return_value=RunOutput(content=output)
+        return_value=RunOutput(content="Most likely: Issue 1.")
     )
 
     result = await diagnostics_service_instance.diagnose(
@@ -131,9 +146,8 @@ async def test_diagnose_generates_session_id(diagnostics_service_instance):
 async def test_diagnose_includes_listing_id_in_agent_input(
     diagnostics_service_instance,
 ):
-    output = DiagnosticsOutput(diagnostics=["Issue 1"])
     diagnostics_service_instance.agent.arun = AsyncMock(
-        return_value=RunOutput(content=output)
+        return_value=RunOutput(content="Most likely: Issue 1.")
     )
 
     await diagnostics_service_instance.diagnose(
@@ -148,9 +162,8 @@ async def test_diagnose_includes_listing_id_in_agent_input(
 async def test_diagnose_creates_fresh_sql_tools(
     diagnostics_service_instance, mock_sql_tools
 ):
-    output = DiagnosticsOutput(diagnostics=["Issue 1"])
     diagnostics_service_instance.agent.arun = AsyncMock(
-        return_value=RunOutput(content=output)
+        return_value=RunOutput(content="Most likely: Issue 1.")
     )
 
     await diagnostics_service_instance.diagnose(

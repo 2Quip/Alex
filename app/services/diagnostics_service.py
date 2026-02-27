@@ -22,47 +22,19 @@ from app.tools.send_document import SendDocumentTool
 logger = logging.getLogger(__name__)
 
 
-def _parse_diagnostics(text: str) -> list[dict]:
-    """Parse structured diagnostics into dicts with likelihood, diagnosis, cause, fix.
-
-    Expected format per line:
-        1. [High] Diagnosis title | Cause: brief cause | Fix: brief fix
-
-    Falls back to plain string if a line doesn't match the pattern.
-    """
+def _parse_diagnostics(text: str) -> list[str]:
+    """Split diagnostics paragraphs into a list of strings."""
     import re
-    items = re.split(r"\n\s*\d+\.\s+", "\n" + text.strip())
+    # Split on blank lines or numbered prefixes
+    parts = re.split(r"\n\s*\n|\n\s*\d+\.\s+", "\n" + text.strip())
     results = []
-    for item in items:
-        item = item.strip()
-        if not item:
+    for p in parts:
+        p = p.strip()
+        # Skip empty, error messages, or raw JSON/function fragments
+        if not p or p.startswith("{") or "tool_use_failed" in p or "error" in p[:20].lower():
             continue
-
-        # Try to parse structured format: [Likelihood] Title | Cause: ... | Fix: ...
-        m = re.match(
-            r"\[(?P<likelihood>High|Medium|Low)\]\s*(?P<diagnosis>.+?)(?:\s*\|\s*Cause:\s*(?P<cause>.+?))?(?:\s*\|\s*Fix:\s*(?P<fix>.+?))?$",
-            item,
-            re.IGNORECASE | re.DOTALL,
-        )
-        if m:
-            results.append({
-                "likelihood": m.group("likelihood").capitalize(),
-                "diagnosis": m.group("diagnosis").strip(),
-                "cause": (m.group("cause") or "").strip(),
-                "fix": (m.group("fix") or "").strip(),
-            })
-        else:
-            # Fallback: return as plain diagnosis
-            results.append({
-                "likelihood": "",
-                "diagnosis": item,
-                "cause": "",
-                "fix": "",
-            })
-
-        if len(results) >= 5:
-            break
-    return results
+        results.append(p)
+    return results[:5]
 
 # Database configuration
 ENGINE = settings.db_engine
@@ -70,13 +42,9 @@ GROQ_API_KEY = settings.GROQ_API_KEY
 
 # System prompt for the diagnostics agent
 DIAGNOSTICS_SYSTEM_PROMPT = """
-You are Alex, an AI diagnostic specialist. Query the listing table for the id. Provide up to 5 diagnostics prioritized by likelihood. Do not use web search unless the database has zero relevant data. No emojis.
+You are Alex, an AI diagnostic specialist. Query the listing table for the id. Provide up to 5 diagnostics prioritized by likelihood. Do not use web search. No emojis.
 
-Use this exact format for each diagnostic, one per line:
-1. [High] Diagnosis title | Cause: brief cause | Fix: brief fix
-2. [Medium] Diagnosis title | Cause: brief cause | Fix: brief fix
-
-Likelihood must be High, Medium, or Low. Keep each line to one sentence per field. No intro, no summary.
+Each diagnostic must start with the likelihood (e.g. "Most likely", "Possible"), then the diagnosis, cause, how to check, and fix. Keep each diagnostic to 3-4 sentences maximum. Be concise. Separate each diagnostic with a blank line.
 """
 
 
@@ -122,9 +90,9 @@ class DiagnosticsService:
                 ))
             tools = [self.ddg_tools, sql_tools] + self._extra_tools
 
-            # Create the agent — Groq for fast inference
+            # Create the agent — Gemini 2.5 Flash via OpenRouter for speed
             self.agent = Agent(
-                model=Groq(id="llama-3.3-70b-versatile", api_key=GROQ_API_KEY),
+                model=OpenRouter(id="google/gemini-2.5-flash", api_key=settings.OPENROUTER_API_KEY),
                 markdown=False,
                 tools=tools,
                 system_message=DIAGNOSTICS_SYSTEM_PROMPT,
