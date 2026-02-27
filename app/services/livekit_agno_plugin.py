@@ -277,8 +277,9 @@ _TOOL_ROUTING_RE = re.compile(
 # "json" immediately before a brace (e.g. 'json{"query":...')
 _JSON_PREFIX_RE = re.compile(r"json\s*\{[^}]{0,500}\}", re.IGNORECASE)
 
-# Raw JSON blobs
+# Raw JSON blobs (objects and arrays)
 _JSON_BLOB_RE = re.compile(r"\{[^}]{0,500}\}")
+_JSON_ARRAY_RE = re.compile(r"\[[\s]*\{[\s\S]{0,2000}\}[\s]*\]")
 
 # Internal reasoning sentences — lines that are clearly the model thinking,
 # not talking to the user. Matched case-insensitively.
@@ -325,7 +326,8 @@ def _sanitize_for_tts(text: str) -> str:
 
     # Remove "json{...}" patterns
     text = _JSON_PREFIX_RE.sub("", text)
-    # Remove raw JSON blobs
+    # Remove raw JSON blobs and arrays
+    text = _JSON_ARRAY_RE.sub("", text)
     text = _JSON_BLOB_RE.sub("", text)
 
     # Remove SQL query fragments
