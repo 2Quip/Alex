@@ -138,17 +138,53 @@ class AgnoStream(llm.LLMStream):
                 await asyncio.sleep(wait)
 
     def _get_user_input(self) -> str | None:
-        """Extract the last user message from chat context."""
+        """Extract the last actionable message from chat context.
 
-        for msg in reversed(self._chat_ctx.items):
+        Priority order:
+        1. Last user message (normal conversation)
+        2. Last developer message (generate_reply instructions)
+        3. Last non-assistant, non-system message (catch-all)
+        """
+        items = self._chat_ctx.items
+
+        # Log what's in the context for debugging
+        if items:
+            roles = [
+                f"{type(m).__name__}(role={m.role})"
+                if isinstance(m, ChatMessage) else type(m).__name__
+                for m in items
+            ]
+            logger.debug("Chat context items: %s", roles)
+
+        # 1. Normal case: last user utterance
+        for msg in reversed(items):
             if isinstance(msg, ChatMessage) and msg.role == "user":
+                return msg.text_content
+
+        # 2. generate_reply(instructions=...) — may use developer role
+        for msg in reversed(items):
+            if isinstance(msg, ChatMessage) and msg.role == "developer":
+                return msg.text_content
+
+        # 3. Fallback: any non-system, non-assistant message with content
+        for msg in reversed(items):
+            if isinstance(msg, ChatMessage) and msg.role not in ("assistant", "system"):
                 content = msg.text_content
-                return content
+                if content:
+                    logger.debug("Fallback input from role=%s: %s", msg.role, content[:100])
+                    return content
+
         return None
 
 
 def _sanitize_for_tts(text: str) -> str:
-    """Strip markdown and special characters so TTS reads natural speech."""
+    """Strip markdown, reasoning tokens, and special characters so TTS reads natural speech."""
+    # Strip model reasoning / internal tags that should never be spoken
+    text = re.sub(r"</?(?:analysis|assistantcommentary|assistantfinal)>", "", text)
+    # Strip tool-call routing fragments (e.g. "to=functions.run_sql_query")
+    text = re.sub(r"to=functions\.\S+", "", text)
+    # Strip raw JSON blobs that sometimes leak (e.g. {"name": ...})
+    text = re.sub(r"\{[^}]{0,500}\}", "", text)
     # Remove markdown headers (### Header)
     text = re.sub(r"#{1,6}\s*", "", text)
     # Remove bold/italic markers (**bold**, *italic*, __bold__, _italic_)
@@ -185,8 +221,9 @@ def _to_chat_chunk(event: Any) -> llm.ChatChunk | None:
         content = (
             str(event.content) if not isinstance(event.content, str) else event.content
         )
-    elif hasattr(event, "content") and event.content:
-        content = str(event.content)
+    # No catch-all hasattr — only RunContentEvent and RunOutput carry
+    # content meant for the user.  Other events (tool calls, metrics,
+    # etc.) are silently dropped to prevent tool metadata leaking to TTS.
 
     if content:
         content = _sanitize_for_tts(content)

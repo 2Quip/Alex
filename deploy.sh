@@ -31,7 +31,7 @@ start_voice() {
         return 1
     fi
     echo "Starting voice agent..."
-    nohup python -m app.livekit_agent dev > "$VOICE_LOG_FILE" 2>&1 &
+    nohup python -m app.livekit_agent start > "$VOICE_LOG_FILE" 2>&1 &
     echo $! > "$VOICE_PID_FILE"
     echo "Voice agent started (PID: $(cat "$VOICE_PID_FILE"))"
 }

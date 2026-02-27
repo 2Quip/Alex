@@ -1,22 +1,24 @@
 """
 LiveKit Voice Agent with Agno Integration
 
-This module implements a voice agent using LiveKit's VoicePipelineAgent
-combined with Agno's powerful agentic capabilities including tool calling,
+This module implements a voice agent using LiveKit's Agent framework
+combined with Agno's agentic capabilities including tool calling,
 knowledge bases, and memory.
 
 Usage:
-    python -m app.livekit_agent dev
+    python -m app.livekit_agent start       # production
+    python -m app.livekit_agent dev         # development (auto-reload)
 
 Environment Variables Required:
     - LIVEKIT_URL: Your LiveKit server URL (wss://your-server.livekit.cloud)
     - LIVEKIT_API_KEY: Your LiveKit API key
     - LIVEKIT_API_SECRET: Your LiveKit API secret
     - OPENAI_API_KEY: Your OpenAI API key (for the LLM)
-    - ASSEMBLYAI_API_KEY: Your AssemblyAI API key (for STT) - or use Deepgram
-    - CARTESIA_API_KEY: Your Cartesia API key (for TTS) - optional
+    - ASSEMBLYAI_API_KEY: Your AssemblyAI API key (for STT)
+    - CARTESIA_API_KEY: Your Cartesia API key (for TTS)
 """
 
+import asyncio
 import logging
 import sys
 from pathlib import Path
@@ -26,17 +28,15 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from agno.agent import Agent as AgnoAgent
 from agno.db.sqlite import SqliteDb
-from agno.models.openai import OpenAIChat
 from agno.models.openrouter import OpenRouter
-from agno.db.sqlite import SqliteDb
 from agno.tools.duckduckgo import DuckDuckGoTools
 from agno.tools.sql import SQLTools
 from dotenv import load_dotenv
-from livekit import rtc
+from livekit import api, rtc
 from livekit.agents import (
     Agent,
-    AgentServer,
     AgentSession,
+    AgentServer,
     JobContext,
     JobProcess,
     cli,
@@ -79,6 +79,16 @@ Keep responses concise and conversational. Use natural speech patterns and contr
 YOUR CAPABILITIES:
 You can search the web for OEM documentation, part numbers, troubleshooting guides, and current information. You can query work order history, equipment data, parts inventory, and operational metrics from the database in read-only mode. When a user asks you to send or share a document, PDF, repair guide, or manual, use the send_document tool. Search for the document URL first, then call send_document with the title and URL. Always use this tool when the user says "send me", "share", or "deliver" a document instead of just reading the content aloud. When looking for documents, always search the company document store first using search_documents. If not found there, search the web. If you find a document on the web, save it to the document store using save_document so it is available next time. Use get_document_url to generate download links for stored documents.
 
+DATABASE USAGE (read-only SELECT queries only):
+Before querying, use the list_tables tool to discover available tables, then use describe_table to learn column names. Do not guess column names. Always use SELECT statements only.
+
+DOCUMENT SEARCH WORKFLOW (always follow this order):
+Step 1: Search the document store first using search_documents with a relevant prefix.
+Step 2: If found, use get_document_url to generate a download link and deliver it.
+Step 3: If NOT found in the document store, search the web using DuckDuckGo.
+Step 4: If found on the web, save it to the document store using save_document with a well-organized key path so it is available for future searches.
+Step 5: Deliver the document to the user via send_document if configured, or share the link directly.
+
 RESPONSE STYLE:
 For simple questions, give direct brief answers. For troubleshooting, explain the issue then walk through two or three key steps conversationally. For data queries, summarize the key findings in natural sentences. Always acknowledge when you're searching or querying.
 
@@ -87,29 +97,55 @@ Remember, your responses will be spoken aloud, so write exactly the way a helpfu
 
 
 # =============================================================================
-# Database and Tool Setup
+# Lazy Database Initialization
 # =============================================================================
 
-ENGINE = settings.db_engine
+_engine = None
+
+
+def _get_engine():
+    """Return the DB engine, creating it lazily on first call.
+
+    Avoids module-level DB connections that can cause process
+    initialization timeouts in LiveKit's worker pool.
+    """
+    global _engine
+    if _engine is None:
+        _engine = settings.db_engine
+        logger.info("Database engine initialized (lazy)")
+    return _engine
+
+
 OPENROUTER_API_KEY = settings.OPENROUTER_API_KEY
-# SQLite DB for session persistence - disabled due to pickle errors with LiveKit
-turso_db = SqliteDb(db_file="tmp/livekit_sessions.db")
+
+# Lazy session DB — avoid opening SQLite in every idle child process
+_turso_db = None
+
+
+def _get_turso_db():
+    global _turso_db
+    if _turso_db is None:
+        _turso_db = SqliteDb(db_file="tmp/livekit_sessions.db")
+    return _turso_db
 
 
 def create_sql_tools():
     """Create a fresh SQLTools instance to avoid connection expiration."""
-    return SQLTools(db_engine=ENGINE)
+    return SQLTools(db_engine=_get_engine())
 
 
 def create_agno_agent(session_id: str | None = None) -> AgnoAgent:
     """Create and configure the Agno agent with tools for voice interaction."""
-    
-    # Initialize tools
+
     ddg_tools = DuckDuckGoTools()
     sql_tools = create_sql_tools()
     tools = [ddg_tools, sql_tools]
+
     if settings.DOCUMENT_WEBHOOK_URL:
-        tools.append(SendDocumentTool(webhook_url=settings.DOCUMENT_WEBHOOK_URL, webhook_secret=settings.DOCUMENT_WEBHOOK_SECRET))
+        tools.append(SendDocumentTool(
+            webhook_url=settings.DOCUMENT_WEBHOOK_URL,
+            webhook_secret=settings.DOCUMENT_WEBHOOK_SECRET,
+        ))
     if settings.S3_BUCKET_NAME:
         tools.append(S3SearchTool(
             bucket_name=settings.S3_BUCKET_NAME,
@@ -119,20 +155,17 @@ def create_agno_agent(session_id: str | None = None) -> AgnoAgent:
             presigned_url_expiry=settings.S3_PRESIGNED_URL_EXPIRY,
         ))
 
-    # Create agent without db persistence to avoid pickle errors
-    # LiveKit's AgentSession maintains the conversation context instead
     agent = AgnoAgent(
         model=OpenRouter(id="openai/gpt-oss-120b", api_key=OPENROUTER_API_KEY),
         tools=tools,
         instructions=VOICE_SYSTEM_PROMPT,
-        markdown=False,  # No markdown for voice
+        markdown=False,
         add_datetime_to_context=True,
-        # Session persistence disabled - causes pickle errors with coroutines
-        db=turso_db,
+        db=_get_turso_db(),
         add_history_to_context=True,
         num_history_runs=3,
     )
-    
+
     return agent
 
 
@@ -140,7 +173,10 @@ def create_agno_agent(session_id: str | None = None) -> AgnoAgent:
 # LiveKit Agent Setup
 # =============================================================================
 
-server = AgentServer()
+server = AgentServer(
+    initialize_process_timeout=90.0,
+    num_idle_processes=0,
+)
 
 
 def prewarm(proc: JobProcess):
@@ -152,29 +188,147 @@ def prewarm(proc: JobProcess):
 server.setup_fnc = prewarm
 
 
+# =============================================================================
+# Failsafe Dispatcher
+# =============================================================================
+
+_dispatch_retries: dict[str, int] = {}
+_MAX_DISPATCH_RETRIES = 3
+
+
+async def _failsafe_dispatcher():
+    """Background loop that checks for rooms with participants but no agent.
+
+    If a room has human participants and no agent for 5+ seconds, this
+    dispatches an agent explicitly.  Max 3 retries per room to avoid spam.
+    """
+    if not settings.LIVEKIT_URL or not settings.LIVEKIT_API_KEY:
+        logger.info("Failsafe dispatcher disabled (no LIVEKIT_URL/API_KEY)")
+        return
+
+    lk_api = api.LiveKitAPI(
+        url=settings.LIVEKIT_URL,
+        api_key=settings.LIVEKIT_API_KEY,
+        api_secret=settings.LIVEKIT_API_SECRET,
+    )
+
+    logger.info("Failsafe dispatcher started")
+
+    while True:
+        try:
+            await asyncio.sleep(5)
+            rooms_resp = await lk_api.room.list_rooms(api.ListRoomsRequest())
+            rooms = rooms_resp.rooms if rooms_resp else []
+
+            for room in rooms:
+                try:
+                    participants_resp = await lk_api.room.list_participants(
+                        api.ListParticipantsRequest(room=room.name)
+                    )
+                except Exception:
+                    # Room was destroyed between list_rooms and list_participants
+                    _dispatch_retries.pop(room.name, None)
+                    continue
+
+                participants = participants_resp.participants if participants_resp else []
+                has_human = False
+                has_agent = False
+
+                for p in participants:
+                    if p.kind == api.ParticipantInfo.Kind.AGENT:
+                        has_agent = True
+                    else:
+                        has_human = True
+
+                if has_human and not has_agent:
+                    retries = _dispatch_retries.get(room.name, 0)
+                    if retries >= _MAX_DISPATCH_RETRIES:
+                        continue
+
+                    _dispatch_retries[room.name] = retries + 1
+                    logger.warning(
+                        "Room %s has %d participant(s) but no agent — dispatching (attempt %d/%d)",
+                        room.name,
+                        len(participants),
+                        retries + 1,
+                        _MAX_DISPATCH_RETRIES,
+                    )
+                    try:
+                        await lk_api.agent_dispatch.create_dispatch(
+                            api.CreateAgentDispatchRequest(
+                                room=room.name,
+                                agent_name="alex",
+                            )
+                        )
+                    except Exception as dispatch_err:
+                        logger.error(
+                            "Failed to dispatch agent to room %s: %s",
+                            room.name,
+                            dispatch_err,
+                        )
+                else:
+                    # Room is fine — reset retry counter
+                    _dispatch_retries.pop(room.name, None)
+
+        except Exception as e:
+            logger.error("Failsafe dispatcher error: %s", e)
+            await asyncio.sleep(10)
+
+
+# =============================================================================
+# Worker Event Handlers
+# =============================================================================
+
 @server.on("worker_started")
 def on_worker_started():
-    """Start health server and mark agent as running."""
-    import asyncio
+    """Start health server, failsafe dispatcher, and mark agent as running."""
     asyncio.create_task(start_health_server(port=settings.VOICE_HEALTH_PORT))
+    asyncio.create_task(_failsafe_dispatcher())
     health.mark_running()
     logger.info("Voice agent worker started, health server running")
 
 
-@server.rtc_session()
+# =============================================================================
+# AlexAgent — LiveKit Agent subclass with greeting on connect
+# =============================================================================
+
+class AlexAgent(Agent):
+    """LiveKit Agent that greets the user upon entering the session."""
+
+    def __init__(self):
+        super().__init__(
+            instructions=(
+                "You're Alex, a helpful voice assistant for work orders and equipment repair. "
+                "Your responses are spoken aloud, so never use markdown, bullet points, "
+                "numbered lists, or special formatting. Speak naturally in plain conversational sentences."
+            ),
+        )
+
+    async def on_enter(self):
+        """Called when the agent joins the session. Greet the user."""
+        self.session.generate_reply(
+            user_input="[New session started. Please greet the user, introduce yourself as Alex, and briefly offer your assistance with work orders, equipment troubleshooting, or document lookups. Keep it to two sentences.]",
+            allow_interruptions=False,
+        )
+
+
+# =============================================================================
+# RTC Session Handler
+# =============================================================================
+
+@server.rtc_session(agent_name="alex")
 async def voice_agent(ctx: JobContext):
     """Main voice agent session handler."""
-    
-    # Add logging context
+
     ctx.log_context_fields = {
         "room": ctx.room.name,
     }
-    
-    logger.info(f"Voice agent starting for room: {ctx.room.name}")
+
+    logger.info("Voice agent starting for room: %s", ctx.room.name)
     health.session_started()
 
     try:
-        # Create the Agno agent with room-specific session
+        # Create the Agno agent with fresh tools
         agno_agent = create_agno_agent()
 
         # Wrap the Agno agent for LiveKit
@@ -185,35 +339,24 @@ async def voice_agent(ctx: JobContext):
 
         # Create the voice pipeline session
         session = AgentSession(
-            # Speech-to-text (STT) - your agent's ears
             stt=inference.STT(model="assemblyai/universal-streaming", language="en"),
-
-            # LLM - your agent's brain (Agno wrapped for LiveKit)
             llm=livekit_llm,
-
-            # Text-to-speech (TTS) - your agent's voice
             tts=inference.TTS(
                 model="cartesia/sonic-3",
-                voice="9626c31c-bec5-4cca-baa8-f8ba9e84c8bc"  # A natural-sounding voice
+                voice="9626c31c-bec5-4cca-baa8-f8ba9e84c8bc",
             ),
-
-            # Turn detection for natural conversation flow
-            # turn_detection=MultilingualModel(),
-
-            # Voice Activity Detection (prewarmed)
+            turn_detection=MultilingualModel(),
             vad=ctx.proc.userdata["vad"],
-
-            # Allow LLM to start generating while user is finishing speaking
             preemptive_generation=True,
         )
 
-        # Connect to the room first
+        # Connect to the room
         await ctx.connect()
-        logger.info(f"Connected to room: {ctx.room.name}")
+        logger.info("Connected to room: %s", ctx.room.name)
 
-        # Then start the voice session
+        # Start the voice session with the AlexAgent (triggers on_enter greeting)
         await session.start(
-            agent=Agent(instructions="You're Alex, a helpful voice assistant. Your responses are spoken aloud, so never use markdown, bullet points, numbered lists, or special formatting. Speak naturally in plain conversational sentences."),
+            agent=AlexAgent(),
             room=ctx.room,
             room_options=room_io.RoomOptions(
                 audio_input=room_io.AudioInputOptions(
@@ -225,7 +368,7 @@ async def voice_agent(ctx: JobContext):
                 ),
             ),
         )
-        logger.info(f"Voice session started for room: {ctx.room.name}")
+        logger.info("Voice session started for room: %s", ctx.room.name)
     except Exception as e:
         health.mark_error(str(e))
         raise

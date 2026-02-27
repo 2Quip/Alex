@@ -75,8 +75,14 @@ def setup_logging(
     root_logger.addHandler(file_handler)
 
     # Suppress noisy third-party loggers
-    for name in ("httpx", "httpcore", "urllib3"):
+    for name in ("httpx", "httpcore", "urllib3", "hpack", "hpack.hpack", "hpack.table"):
         logging.getLogger(name).setLevel(logging.WARNING)
+    # Silero VAD "inference is slower than realtime" is noisy on dev machines
+    logging.getLogger("livekit.plugins.silero").setLevel(logging.ERROR)
+    # Rust SDK "could not find published track" errors on participant disconnect — benign
+    logging.getLogger("livekit").setLevel(logging.WARNING)
+    # Preserve livekit.agents logs at the configured level
+    logging.getLogger("livekit.agents").setLevel(level)
 
     logging.getLogger(__name__).info(
         "Logging configured: level=%s, file=%s, format=%s",

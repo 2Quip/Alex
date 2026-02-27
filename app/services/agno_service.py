@@ -15,7 +15,7 @@ from agno.agent import (
 )
 from agno.db.sqlite import SqliteDb
 from agno.models.groq import Groq
-from agno.models.openai import OpenAIChat
+from app.models.openai_patch import PatchedOpenAIChat
 from agno.run.agent import RunContentCompletedEvent, RunOutput
 from agno.tools.duckduckgo import DuckDuckGoTools
 from agno.tools.sql import SQLTools
@@ -190,7 +190,7 @@ class AgnoService:
             # Create the agent with web search and database tools
             self.agent = Agent(
                 # model=Groq(id="openai/gpt-oss-120b", api_key=GROQ_API_KEY),
-                model=OpenAIChat(id="gpt-5-mini-2025-08-07", api_key=OPENAI_API_KEY),
+                model=PatchedOpenAIChat(id="gpt-5-mini-2025-08-07", api_key=OPENAI_API_KEY),
                 markdown=True,
                 tools=tools,
                 system_message=SYSTEM_PROMPT,
