@@ -21,21 +21,40 @@ MAX_TOOL_CALL_ID_LEN = 40
 class PatchedOpenAIChat(OpenAIChat):
     """OpenAIChat with tool_call_id truncation to stay within API limits."""
 
-    def _truncate_tool_call_ids(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Truncate tool_call_id fields that exceed 40 characters."""
-        for msg in messages:
-            # Truncate tool_call_id on tool-result messages
-            if msg.get("tool_call_id") and len(msg["tool_call_id"]) > MAX_TOOL_CALL_ID_LEN:
-                original = msg["tool_call_id"]
-                msg["tool_call_id"] = original[:MAX_TOOL_CALL_ID_LEN]
-                logger.debug("Truncated tool_call_id: %s -> %s", original, msg["tool_call_id"])
+    def _truncate_tool_call_ids(self, messages: list) -> list:
+        """Truncate tool_call_id fields that exceed 40 characters.
 
-            # Truncate tool_call ids inside assistant tool_calls
-            for tc in msg.get("tool_calls", []):
-                if tc.get("id") and len(tc["id"]) > MAX_TOOL_CALL_ID_LEN:
-                    original = tc["id"]
-                    tc["id"] = original[:MAX_TOOL_CALL_ID_LEN]
-                    logger.debug("Truncated tool_call id: %s -> %s", original, tc["id"])
+        Messages may be plain dicts or Agno Message (Pydantic) objects, so
+        we use getattr/setattr with a dict fallback.
+        """
+        for msg in messages:
+            # --- tool_call_id on tool-result messages ---
+            tool_call_id = (
+                msg.get("tool_call_id") if isinstance(msg, dict)
+                else getattr(msg, "tool_call_id", None)
+            )
+            if tool_call_id and len(tool_call_id) > MAX_TOOL_CALL_ID_LEN:
+                truncated = tool_call_id[:MAX_TOOL_CALL_ID_LEN]
+                if isinstance(msg, dict):
+                    msg["tool_call_id"] = truncated
+                else:
+                    msg.tool_call_id = truncated
+                logger.debug("Truncated tool_call_id: %s -> %s", tool_call_id, truncated)
+
+            # --- tool_call ids inside assistant tool_calls ---
+            tool_calls = (
+                msg.get("tool_calls", []) if isinstance(msg, dict)
+                else getattr(msg, "tool_calls", None) or []
+            )
+            for tc in tool_calls:
+                tc_id = tc.get("id") if isinstance(tc, dict) else getattr(tc, "id", None)
+                if tc_id and len(tc_id) > MAX_TOOL_CALL_ID_LEN:
+                    truncated = tc_id[:MAX_TOOL_CALL_ID_LEN]
+                    if isinstance(tc, dict):
+                        tc["id"] = truncated
+                    else:
+                        tc.id = truncated
+                    logger.debug("Truncated tool_call id: %s -> %s", tc_id, truncated)
 
         return messages
 
