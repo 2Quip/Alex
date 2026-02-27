@@ -38,8 +38,15 @@ class DiagnosticsRequest(BaseModel):
     user_id: str = "default"
 
 
+class DiagnosticItem(BaseModel):
+    likelihood: str = ""
+    diagnosis: str = ""
+    cause: str = ""
+    fix: str = ""
+
+
 class DiagnosticsResponse(BaseModel):
-    diagnostics: list[str]
+    diagnostics: list[DiagnosticItem]
     listing_id: str
     session_id: str
     execution_time: float
