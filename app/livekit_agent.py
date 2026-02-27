@@ -43,7 +43,7 @@ from livekit.agents import (
     inference,
     room_io,
 )
-from livekit.plugins import noise_cancellation, silero
+from livekit.plugins import cartesia, noise_cancellation, silero
 from livekit.plugins.turn_detector.multilingual import MultilingualModel
 
 from app.services.livekit_agno_plugin import LLMAdapter
@@ -325,9 +325,10 @@ async def voice_agent(ctx: JobContext):
         session = AgentSession(
             stt=inference.STT(model="assemblyai/universal-streaming", language="en"),
             llm=livekit_llm,
-            tts=inference.TTS(
-                model="cartesia/sonic-3",
+            tts=cartesia.TTS(
+                model="sonic-2",
                 voice="9626c31c-bec5-4cca-baa8-f8ba9e84c8bc",
+                speed="slow",
             ),
             turn_detection=MultilingualModel(),
             vad=ctx.proc.userdata["vad"],
