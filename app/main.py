@@ -201,7 +201,7 @@ async def livekit_token(request: TokenRequest):
             detail="LiveKit is not configured",
         )
 
-    from livekit.api import AccessToken, VideoGrants, RoomAgentDispatch, RoomConfiguration
+    from livekit.api import AccessToken, VideoGrants
 
     token = AccessToken(settings.LIVEKIT_API_KEY, settings.LIVEKIT_API_SECRET)
     token.with_identity(request.identity)
@@ -210,14 +210,6 @@ async def livekit_token(request: TokenRequest):
         token.with_name(request.name)
     if request.metadata:
         token.with_metadata(request.metadata)
-
-    # Dispatch the "alex" voice agent to the room when the participant connects.
-    # Without this, agent_name="alex" disables auto-dispatch and rooms get no agent.
-    token.with_room_config(
-        RoomConfiguration(
-            agents=[RoomAgentDispatch(agent_name="alex")]
-        )
-    )
 
     return TokenResponse(token=token.to_jwt(), url=settings.LIVEKIT_URL)
 

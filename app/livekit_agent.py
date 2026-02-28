@@ -255,7 +255,6 @@ async def _failsafe_dispatcher():
                         await lk_api.agent_dispatch.create_dispatch(
                             api.CreateAgentDispatchRequest(
                                 room=room.name,
-                                agent_name="alex",
                             )
                         )
                     except Exception as dispatch_err:
@@ -342,7 +341,7 @@ def _extract_page_context(ctx: JobContext) -> dict | None:
     return None
 
 
-@server.rtc_session(agent_name="alex")
+@server.rtc_session()
 async def voice_agent(ctx: JobContext):
     """Main voice agent session handler."""
 

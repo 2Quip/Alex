@@ -142,7 +142,7 @@ async def test_livekit_token(client):
     mock_token.to_jwt.return_value = "eyJ.test.token"
     with patch("app.main.settings") as mock_settings, patch(
         "livekit.api.AccessToken", return_value=mock_token
-    ), patch("livekit.api.RoomAgentDispatch"), patch("livekit.api.RoomConfiguration"):
+    ):
         mock_settings.LIVEKIT_URL = "wss://test.livekit.cloud"
         mock_settings.LIVEKIT_API_KEY = "APIkey123"
         mock_settings.LIVEKIT_API_SECRET = "secret456"
@@ -154,7 +154,6 @@ async def test_livekit_token(client):
     data = resp.json()
     assert data["token"] == "eyJ.test.token"
     assert data["url"] == "wss://test.livekit.cloud"
-    mock_token.with_room_config.assert_called_once()
 
 
 @pytest.mark.asyncio
@@ -182,7 +181,7 @@ async def test_livekit_token_with_name(client):
     mock_token.to_jwt.return_value = "eyJ.named.token"
     with patch("app.main.settings") as mock_settings, patch(
         "livekit.api.AccessToken", return_value=mock_token
-    ), patch("livekit.api.RoomAgentDispatch"), patch("livekit.api.RoomConfiguration"):
+    ):
         mock_settings.LIVEKIT_URL = "wss://test.livekit.cloud"
         mock_settings.LIVEKIT_API_KEY = "APIkey123"
         mock_settings.LIVEKIT_API_SECRET = "secret456"
