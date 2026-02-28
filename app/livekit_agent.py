@@ -177,7 +177,9 @@ server.setup_fnc = prewarm
 # =============================================================================
 
 _dispatch_last_sent: dict[str, float] = {}  # room → timestamp of last dispatch
-_DISPATCH_COOLDOWN = 30  # seconds to wait after dispatching before checking again
+_dispatch_count: dict[str, int] = {}  # room → number of dispatches
+_DISPATCH_COOLDOWN = 60  # seconds to wait after dispatching before checking again
+_MAX_DISPATCHES = 2  # max dispatch attempts per room before giving up
 
 
 async def _failsafe_dispatcher():
@@ -207,9 +209,17 @@ async def _failsafe_dispatcher():
             now = asyncio.get_event_loop().time()
 
             for room in rooms:
+                # Skip non-voice rooms (e.g. chatbot-*, text-*)
+                if room.name.startswith(("chatbot-", "text-")):
+                    continue
+
                 # Skip if we recently dispatched to this room
                 last_sent = _dispatch_last_sent.get(room.name, 0)
                 if now - last_sent < _DISPATCH_COOLDOWN:
+                    continue
+
+                # Skip if we've already tried too many times for this room
+                if _dispatch_count.get(room.name, 0) >= _MAX_DISPATCHES:
                     continue
 
                 try:
@@ -231,11 +241,15 @@ async def _failsafe_dispatcher():
                         has_human = True
 
                 if has_human and not has_agent:
+                    count = _dispatch_count.get(room.name, 0) + 1
+                    _dispatch_count[room.name] = count
                     _dispatch_last_sent[room.name] = now
                     logger.warning(
-                        "Room %s has %d participant(s) but no agent — dispatching",
+                        "Room %s has %d participant(s) but no agent — dispatching (attempt %d/%d)",
                         room.name,
                         len(participants),
+                        count,
+                        _MAX_DISPATCHES,
                     )
                     try:
                         await lk_api.agent_dispatch.create_dispatch(
@@ -251,8 +265,9 @@ async def _failsafe_dispatcher():
                             dispatch_err,
                         )
                 else:
-                    # Room is fine — clear cooldown
+                    # Room is fine or empty — clear state
                     _dispatch_last_sent.pop(room.name, None)
+                    _dispatch_count.pop(room.name, None)
 
         except Exception as e:
             logger.error("Failsafe dispatcher error: %s", e)
