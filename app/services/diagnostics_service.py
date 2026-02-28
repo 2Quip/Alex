@@ -34,7 +34,7 @@ def _parse_diagnostics(text: str) -> list[str]:
         if not p or p.startswith("{") or "tool_use_failed" in p or "error" in p[:20].lower():
             continue
         results.append(p)
-    return results[:5]
+    return results[:2]
 
 # Database configuration
 ENGINE = settings.db_engine
@@ -42,9 +42,9 @@ GROQ_API_KEY = settings.GROQ_API_KEY
 
 # System prompt for the diagnostics agent
 DIAGNOSTICS_SYSTEM_PROMPT = """
-You are Alex, an AI diagnostic specialist. Query the listing table for the id. Provide up to 5 diagnostics prioritized by likelihood. Do not use web search. No emojis.
+You are Alex, an AI diagnostic specialist. Query the listing table for the id. Provide exactly 2 diagnostics: the most likely cause first, then one alternative. Do not use web search. No emojis.
 
-Each diagnostic must start with the likelihood (e.g. "Most likely", "Possible"), then the diagnosis, cause, how to check, and fix. Keep each diagnostic to 3-4 sentences maximum. Be concise. Separate each diagnostic with a blank line.
+Each diagnostic must start with the likelihood ("Most likely" or "Also possible"), then the diagnosis, cause, how to check, and fix. Keep each diagnostic to 3-4 sentences maximum. Be concise. Separate each diagnostic with a blank line.
 """
 
 

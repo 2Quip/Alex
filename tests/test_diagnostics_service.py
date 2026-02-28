@@ -24,10 +24,10 @@ def test_parse_diagnostics_numbered_split():
     assert result == ["Bad battery cause and fix.", "Faulty starter cause and fix."]
 
 
-def test_parse_diagnostics_max_five():
+def test_parse_diagnostics_max_two():
     text = "\n\n".join(f"Diag {i}" for i in range(10))
     result = _parse_diagnostics(text)
-    assert len(result) == 5
+    assert len(result) == 2
 
 
 def test_parse_diagnostics_filters_json():
