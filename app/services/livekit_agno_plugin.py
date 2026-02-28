@@ -6,8 +6,10 @@
 from __future__ import annotations
 
 import asyncio
+import json as _json
 import logging
 import re
+from collections.abc import Callable
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -40,11 +42,13 @@ class LLMAdapter(llm.LLM):
         *,
         session_id: str | None = None,
         user_id: str | None = None,
+        send_link: Callable[[str], None] | None = None,
     ) -> None:
         super().__init__()
         self._agent = agent
         self._session_id = session_id
         self._user_id = user_id
+        self._send_link = send_link
 
     @property
     def model(self) -> str:
@@ -73,6 +77,7 @@ class LLMAdapter(llm.LLM):
             agent=self._agent,
             session_id=self._session_id,
             user_id=self._user_id,
+            send_link=self._send_link,
         )
 
 
@@ -89,6 +94,7 @@ class AgnoStream(llm.LLMStream):
         agent: Agent,
         session_id: str | None = None,
         user_id: str | None = None,
+        send_link: Callable[[str], None] | None = None,
     ):
         super().__init__(
             llm_adapter, chat_ctx=chat_ctx, tools=tools, conn_options=conn_options
@@ -96,6 +102,7 @@ class AgnoStream(llm.LLMStream):
         self._agent = agent
         self._session_id = session_id
         self._user_id = user_id
+        self._send_link = send_link
 
     async def _run(self) -> None:
         # Convert chat context to the last user message for Agno
@@ -122,6 +129,7 @@ class AgnoStream(llm.LLMStream):
                 # boundaries so _sanitize_for_tts can match multi-token
                 # patterns (reasoning sentences, role tokens, tool routing).
                 buffer = ""
+                sent_urls: set[str] = set()
 
                 async for event in response_stream:
                     raw = _extract_content(event)
@@ -137,6 +145,14 @@ class AgnoStream(llm.LLMStream):
                             break
                         sentence = buffer[:idx]
                         buffer = buffer[idx:]
+
+                        # Extract and send URLs before TTS strips them
+                        if self._send_link:
+                            for url in _extract_urls(sentence):
+                                if url not in sent_urls:
+                                    sent_urls.add(url)
+                                    self._send_link(url)
+
                         cleaned = _sanitize_for_tts(sentence)
                         if cleaned and cleaned.strip():
                             content_sent = True
@@ -151,6 +167,12 @@ class AgnoStream(llm.LLMStream):
 
                 # Flush remaining buffer
                 if buffer.strip():
+                    if self._send_link:
+                        for url in _extract_urls(buffer):
+                            if url not in sent_urls:
+                                sent_urls.add(url)
+                                self._send_link(url)
+
                     cleaned = _sanitize_for_tts(buffer)
                     if cleaned and cleaned.strip():
                         content_sent = True
@@ -351,6 +373,9 @@ _REASONING_SENTENCE_RE = re.compile(
     "|".join(_REASONING_SENTENCE_PATTERNS), re.IGNORECASE
 )
 
+# URLs — extract before sanitizing, replace with spoken placeholder
+_URL_RE = re.compile(r"https?://[^\s)\]\"'>]+")
+
 # SQL query fragments — match the entire statement, not just the keyword
 _SQL_LEAK_RE = re.compile(
     r"(?:SELECT\s+.+|WHERE\s+.+|INSERT\s+.+|UPDATE\s+.+|DELETE\s+.+|ALTER\s+.+|DROP\s+.+|CREATE\s+.+)",
@@ -358,11 +383,19 @@ _SQL_LEAK_RE = re.compile(
 )
 
 
+def _extract_urls(text: str) -> list[str]:
+    """Pull all URLs from text."""
+    return _URL_RE.findall(text)
+
+
 def _sanitize_for_tts(text: str) -> str:
     """Strip markdown, reasoning tokens, tool metadata, and special characters
     so TTS reads natural speech only."""
 
-    # --- Phase 0: Strip bare reasoning prefixes (no angle brackets) ---
+    # --- Phase 0a: Replace URLs with spoken placeholder ---
+    text = _URL_RE.sub("I'm sending you a link", text)
+
+    # --- Phase 0b: Strip bare reasoning prefixes (no angle brackets) ---
     # e.g. "analysisWe have trouble..." → "We have trouble..."
     # Then the reasoning sentence filter below will catch the rest.
     text = _BARE_PREFIX_RE.sub("", text)

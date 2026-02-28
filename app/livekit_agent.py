@@ -359,10 +359,21 @@ async def voice_agent(ctx: JobContext):
         # Create the Agno agent with tools (no page context yet — need room connection first)
         agno_agent = create_agno_agent()
 
+        # Callback to send clickable links to the frontend via data channel
+        def send_link_to_room(url: str):
+            """Publish a URL as a data message so the frontend can render it as a clickable link."""
+            import json as _json
+            payload = _json.dumps({"type": "link", "url": url}).encode("utf-8")
+            asyncio.get_event_loop().create_task(
+                ctx.room.local_participant.publish_data(payload, topic="link")
+            )
+            logger.info("Sent link to room %s: %s", ctx.room.name, url[:100])
+
         # Wrap the Agno agent for LiveKit
         livekit_llm = LLMAdapter(
             agent=agno_agent,
             session_id=ctx.room.name,
+            send_link=send_link_to_room,
         )
 
         # Create the voice pipeline session
