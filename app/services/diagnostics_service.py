@@ -9,8 +9,8 @@ from agno.models.groq import Groq
 from app.models.openai_patch import PatchedOpenAIChat
 from agno.models.openrouter import OpenRouter
 from agno.run.agent import RunOutput
-from agno.tools.duckduckgo import DuckDuckGoTools
-from agno.tools.sql import SQLTools
+from app.tools.search import create_search_tools
+from app.tools.sql_tool import create_sql_tools
 from pydantic import BaseModel, Field
 
 from app.config.settings import settings
@@ -58,9 +58,9 @@ class DiagnosticsService:
         self._extra_tools: list = []
 
     def _create_sql_tools(self):
-        """Create a fresh SQLTools instance to avoid connection expiration"""
+        """Create a fresh read-only SQLTools instance to avoid connection expiration"""
         logger.debug("Creating fresh SQLTools instance for diagnostics")
-        return SQLTools(db_engine=ENGINE)
+        return create_sql_tools(db_engine=ENGINE)
 
     async def initialize(self):
         """Initialize the diagnostics agent with DuckDuckGo search and SQL tools"""
@@ -68,11 +68,8 @@ class DiagnosticsService:
             return
 
         try:
-            # Initialize DuckDuckGo tools
-            self.ddg_tools = DuckDuckGoTools(
-                timeout=10,
-                fixed_max_results=5,
-            )
+            # Initialize search tools
+            self.ddg_tools = create_search_tools()
             
             # Create fresh SQL tools instance
             sql_tools = self._create_sql_tools()

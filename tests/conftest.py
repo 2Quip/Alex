@@ -27,8 +27,8 @@ import httpx
 
 from agno.agent import Agent
 from agno.run.agent import RunOutput
-from agno.tools.duckduckgo import DuckDuckGoTools
-from agno.tools.sql import SQLTools
+from agno.tools.duckduckgo import DuckDuckGoTools  # for mock spec
+from app.tools.sql_tool import ReadOnlySQLTools as SQLTools
 
 from app.services.agno_service import AgnoService
 from app.services.diagnostics_service import DiagnosticsService

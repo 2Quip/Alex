@@ -17,14 +17,14 @@ from agno.db.sqlite import SqliteDb
 from agno.models.groq import Groq
 from app.models.openai_patch import PatchedOpenAIChat
 from agno.run.agent import RunContentCompletedEvent, RunOutput
-from agno.tools.duckduckgo import DuckDuckGoTools
-from agno.tools.sql import SQLTools
-
+from app.tools.search import create_search_tools
 from app.config.settings import settings
+from app.core.formatting import md_to_html
 from app.core.logging import logger_hook
 from app.core.retry import MAX_RETRIES, RETRY_BACKOFF, _is_retryable, with_retry
 from app.tools.s3_search import S3SearchTool
 from app.tools.send_document import SendDocumentTool
+from app.tools.sql_tool import create_sql_tools
 
 logger = logging.getLogger(__name__)
 
@@ -156,9 +156,9 @@ class AgnoService:
         self._extra_tools: list = []
 
     def _create_sql_tools(self):
-        """Create a fresh SQLTools instance to avoid connection expiration"""
+        """Create a fresh read-only SQLTools instance to avoid connection expiration"""
         logger.debug("Creating fresh SQLTools instance")
-        return SQLTools(db_engine=ENGINE)
+        return create_sql_tools(db_engine=ENGINE)
 
     async def initialize(self):
         """Initialize the Agno agent with DuckDuckGo search and SQL tools"""
@@ -166,11 +166,8 @@ class AgnoService:
             return
 
         try:
-            # Initialize DuckDuckGo tools once (these don't expire)
-            self.ddg_tools = DuckDuckGoTools(
-                timeout=10,
-                fixed_max_results=5,
-            )
+            # Initialize search tools once (these don't expire)
+            self.ddg_tools = create_search_tools()
             # Create fresh SQL tools instance for initial setup
             sql_tools = self._create_sql_tools()
 
@@ -329,6 +326,7 @@ class AgnoService:
             # Retry loop for transient LLM failures during streaming.
             # Only retry if no content has been sent to the client yet.
             content_yielded = False
+            full_content = ""  # accumulate for final HTML conversion
             start_time = time.time()
 
             for attempt in range(MAX_RETRIES):
@@ -377,6 +375,7 @@ class AgnoService:
                             # Content chunk
                             if chunk.content:
                                 content_yielded = True
+                                full_content += chunk.content
                                 yield f"data: {json.dumps({'type': 'content', 'content': chunk.content})}\n\n"
 
                         elif isinstance(chunk, RunContentCompletedEvent):
@@ -418,6 +417,10 @@ class AgnoService:
                 f"Streaming response completed for session {session_id} "
                 f"in {round(execution_time, 3)}s"
             )
+
+            # Send full HTML-rendered response for the frontend to display
+            if full_content:
+                yield f"data: {json.dumps({'type': 'html', 'content': md_to_html(full_content)})}\n\n"
 
             # Send completion event
             yield f"data: {json.dumps({'type': 'done', 'execution_time': round(execution_time, 3)})}\n\n"

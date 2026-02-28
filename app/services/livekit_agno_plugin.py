@@ -250,22 +250,38 @@ def _extract_content(event: Any) -> str | None:
 # TTS sanitization
 # =============================================================================
 
+# ---------------------------------------------------------------------------
+# Reasoning-prefix tokens (WITHOUT angle brackets)
+# Models like gpt-oss-120b emit these as bare prefixes:
+#   "analysisWe have trouble..."  "assistantcommentaryWe got an error..."
+# ---------------------------------------------------------------------------
+_REASONING_PREFIXES = (
+    "analysis", "assistantcommentary", "assistantfinal", "assistantanalysis",
+    "thinking", "thought", "reasoning", "internal", "scratchpad",
+)
+
+# Bare prefix at the start of text: "analysisWe have..." → strip the prefix
+_BARE_PREFIX_RE = re.compile(
+    r"^(?:" + "|".join(_REASONING_PREFIXES) + r")",
+    re.IGNORECASE,
+)
+
 # Repeated role tokens the model sometimes emits (e.g. "assistantassistantassistant")
 _ROLE_TOKEN_RE = re.compile(r"(?:assistant|user|system){2,}", re.IGNORECASE)
 # Single standalone role token that is the entire chunk
 _LONE_ROLE_RE = re.compile(r"^(?:assistant|user|system)$", re.IGNORECASE)
 
-# Model reasoning / internal tags (opening, closing, or self-closing)
+# Model reasoning / internal tags WITH angle brackets (opening, closing, or self-closing)
 _REASONING_TAG_RE = re.compile(
-    r"</?(?:analysis|assistantcommentary|assistantfinal|thinking|thought|reasoning|internal|scratchpad)[^>]*>",
+    r"</?(?:" + "|".join(_REASONING_PREFIXES) + r")[^>]*>",
     re.IGNORECASE,
 )
 
 # Content between reasoning tags (multiline)
 _REASONING_BLOCK_RE = re.compile(
-    r"<(?:analysis|assistantcommentary|assistantfinal|thinking|thought|reasoning|internal|scratchpad)>"
+    r"<(?:" + "|".join(_REASONING_PREFIXES) + r")>"
     r"[\s\S]*?"
-    r"</(?:analysis|assistantcommentary|assistantfinal|thinking|thought|reasoning|internal|scratchpad)>",
+    r"</(?:" + "|".join(_REASONING_PREFIXES) + r")>",
     re.IGNORECASE,
 )
 
@@ -281,26 +297,64 @@ _JSON_PREFIX_RE = re.compile(r"json\s*\{[^}]{0,500}\}", re.IGNORECASE)
 _JSON_BLOB_RE = re.compile(r"\{[^}]{0,500}\}")
 _JSON_ARRAY_RE = re.compile(r"\[[\s]*\{[\s\S]{0,2000}\}[\s]*\]")
 
-# Internal reasoning sentences — lines that are clearly the model thinking,
-# not talking to the user. Matched case-insensitively.
+# Quoted empty arrays/objects: "[]", "{}"
+_QUOTED_EMPTY_RE = re.compile(r'"?\[\]"?|"?\{\}"?')
+
+# ---------------------------------------------------------------------------
+# Keyword-based reasoning detector
+# If a sentence contains ANY of these keywords, it's internal reasoning.
+# This is intentionally aggressive — false positives are better than leaking
+# database internals to the user.
+# ---------------------------------------------------------------------------
+_REASONING_KEYWORDS = re.compile(
+    r"(?:"
+    # DB / query internals (word boundary where possible)
+    r"\bquery\b|\bsql\b|\btable\b|\bcolumn\b|\bschema\b|\bdatabase\b|\bconnection\b|stream expir|"
+    r"run_?sql|list_?tables|describe_?table|runsqlquery|"
+    # Known table names
+    r"\bwork_order\b|\baemp_equipment\b|\bsupporting_document\b|\binvoice\b|\bbooking\b|"
+    # Tool internals
+    r"\bweb_?search\b|\berror running\b|"
+    # Model self-talk
+    r"\bre-?run\b|fresh (?:query|call)|previous quer|let me search|"
+    # Debugging language
+    r"expir(?:ed|ation)|closed after|timed? ?out|truncat|"
+    # SQL keywords that should never be spoken
+    r"\bSELECT\b|\bWHERE\b|\bINSERT\b|\bDELETE\b|\bFROM\b.*\btable\b|"
+    r"LIKE\s+['\"%]|"
+    # System prompt echo
+    r"^You are Alex, a voice assistant|"
+    r"^RULES:|^TOOLS:|^CURRENT CONTEXT:|"
+    r"Use list_tables|Use describe_table|search the document store"
+    r")",
+    re.IGNORECASE,
+)
+
+# Full-sentence reasoning patterns — drop the entire text if it starts with these
 _REASONING_SENTENCE_PATTERNS = [
-    r"(?:^|\. )We (?:need|still|haven't|should|must|could) ",
-    r"(?:^|\. )Let'?s (?:try|describe|check|see|look|query|get|use|handle)",
-    r"(?:^|\. )Probably ",
-    r"(?:^|\. )(?:It )?might (?:have|be|return|need)",
-    r"(?:^|\. )Error running ",
-    r"(?:^|\. )(?:The )?(?:stream|query|function|tool|result|schema|table|column)s? (?:error|return|fail|might|maybe)",
-    r"(?:^|\. )Not shown\b",
-    r"(?:^|\. )Not captured\b",
-    r"(?:^|\. )Need to handle ",
+    r"^We (?:need|still|haven't|should|must|could|got|have) ",
+    r"^Let'?s ",
+    r"^Probably ",
+    r"^Possibly ",
+    r"^(?:It )?might ",
+    r"^(?:Maybe|Perhaps) ",
+    r"^Error ",
+    r"^Not (?:shown|captured)\b",
+    r"^Need to ",
+    r"^Could (?:try|search|also|attempt|be)",
+    r"^Should be (?:okay|fine|good)",
+    r"^(?:Search|Query|Check|Try|Fetch) ",
+    r"^(?:The )?(?:ID|item|token) (?:is|looks|might|could)",
+    r"^Great\.\s*We ",
 ]
 _REASONING_SENTENCE_RE = re.compile(
     "|".join(_REASONING_SENTENCE_PATTERNS), re.IGNORECASE
 )
 
-# SQL query fragments that leak
+# SQL query fragments — match the entire statement, not just the keyword
 _SQL_LEAK_RE = re.compile(
-    r"SELECT\s+\w+.*?FROM\s+\w+", re.IGNORECASE
+    r"(?:SELECT\s+.+|WHERE\s+.+|INSERT\s+.+|UPDATE\s+.+|DELETE\s+.+|ALTER\s+.+|DROP\s+.+|CREATE\s+.+)",
+    re.IGNORECASE,
 )
 
 
@@ -308,15 +362,21 @@ def _sanitize_for_tts(text: str) -> str:
     """Strip markdown, reasoning tokens, tool metadata, and special characters
     so TTS reads natural speech only."""
 
+    # --- Phase 0: Strip bare reasoning prefixes (no angle brackets) ---
+    # e.g. "analysisWe have trouble..." → "We have trouble..."
+    # Then the reasoning sentence filter below will catch the rest.
+    text = _BARE_PREFIX_RE.sub("", text)
+
+    # If the entire chunk is just a reasoning prefix, drop it
+    if not text.strip() or _LONE_ROLE_RE.match(text.strip()):
+        return ""
+
     # --- Phase 1: Strip model internals ---
 
     # Remove repeated role tokens (assistantassistantassistant...)
     text = _ROLE_TOKEN_RE.sub("", text)
-    # Remove lone role tokens
-    if _LONE_ROLE_RE.match(text.strip()):
-        return ""
 
-    # Remove reasoning blocks (content between tags)
+    # Remove reasoning blocks (content between XML tags)
     text = _REASONING_BLOCK_RE.sub("", text)
     # Remove remaining reasoning tags
     text = _REASONING_TAG_RE.sub("", text)
@@ -329,12 +389,19 @@ def _sanitize_for_tts(text: str) -> str:
     # Remove raw JSON blobs and arrays
     text = _JSON_ARRAY_RE.sub("", text)
     text = _JSON_BLOB_RE.sub("", text)
+    # Remove quoted empty results: "[]", "{}"
+    text = _QUOTED_EMPTY_RE.sub("", text)
 
     # Remove SQL query fragments
     text = _SQL_LEAK_RE.sub("", text)
 
-    # Remove reasoning sentences (model thinking aloud)
-    text = _REASONING_SENTENCE_RE.sub("", text)
+    # Drop entire text if it contains DB/tool/reasoning keywords
+    if _REASONING_KEYWORDS.search(text):
+        return ""
+
+    # Drop entire text if it starts with a reasoning sentence pattern
+    if _REASONING_SENTENCE_RE.match(text.strip()):
+        return ""
 
     # --- Phase 2: Strip markdown formatting ---
 

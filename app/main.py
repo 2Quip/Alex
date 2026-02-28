@@ -13,6 +13,7 @@ from app.core.logging import setup_logging
 # Configure logging before importing services (so their module-level code inherits config)
 setup_logging(log_level=settings.LOG_LEVEL, log_file=settings.LOG_FILE, log_format=settings.LOG_FORMAT)
 
+from app.core.formatting import md_to_html  # noqa: E402
 from app.services.agno_service import agno_service  # noqa: E402
 from app.services.diagnostics_service import diagnostics_service  # noqa: E402
 
@@ -49,6 +50,7 @@ class TokenRequest(BaseModel):
     identity: str
     room: str
     name: Optional[str] = None
+    metadata: Optional[str] = None  # JSON string with page context (listing_id, etc.)
 
 
 class TokenResponse(BaseModel):
@@ -120,7 +122,7 @@ async def chat(request: ChatRequest):
             user_id=request.user_id,
         )
         return ChatResponse(
-            response=result["response"],
+            response=md_to_html(result["response"]),
             session_id=result["session_id"],
         )
     except Exception as e:
@@ -180,7 +182,7 @@ async def diagnostics(request: DiagnosticsRequest):
             user_id=request.user_id,
         )
         return DiagnosticsResponse(
-            diagnostics=result["diagnostics"],
+            diagnostics=[md_to_html(d) for d in result["diagnostics"]],
             listing_id=result["listing_id"],
             session_id=result["session_id"],
             execution_time=result["execution_time"],
@@ -206,6 +208,8 @@ async def livekit_token(request: TokenRequest):
     token.with_grants(VideoGrants(room_join=True, room=request.room))
     if request.name:
         token.with_name(request.name)
+    if request.metadata:
+        token.with_metadata(request.metadata)
 
     return TokenResponse(token=token.to_jwt(), url=settings.LIVEKIT_URL)
 

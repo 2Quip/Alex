@@ -25,8 +25,8 @@ from app.services.agno_service import AgnoService
 async def test_initialize():
     service = AgnoService()
     with (
-        patch("app.services.agno_service.DuckDuckGoTools") as MockDDG,
-        patch("app.services.agno_service.SQLTools") as MockSQL,
+        patch("app.services.agno_service.create_search_tools") as MockDDG,
+        patch("app.services.agno_service.create_sql_tools") as MockSQL,
         patch("app.services.agno_service.Agent") as MockAgent,
     ):
         await service.initialize()
@@ -41,8 +41,8 @@ async def test_initialize():
 async def test_initialize_idempotent():
     service = AgnoService()
     with (
-        patch("app.services.agno_service.DuckDuckGoTools"),
-        patch("app.services.agno_service.SQLTools"),
+        patch("app.services.agno_service.create_search_tools"),
+        patch("app.services.agno_service.create_sql_tools"),
         patch("app.services.agno_service.Agent") as MockAgent,
     ):
         await service.initialize()
@@ -56,7 +56,7 @@ async def test_initialize_error():
     service = AgnoService()
     with (
         patch(
-            "app.services.agno_service.DuckDuckGoTools",
+            "app.services.agno_service.create_search_tools",
             side_effect=RuntimeError("fail"),
         ),
         pytest.raises(RuntimeError, match="fail"),
@@ -76,8 +76,8 @@ async def test_cleanup(agno_service_instance):
 async def test_ensure_initialized_calls_init():
     service = AgnoService()
     with (
-        patch("app.services.agno_service.DuckDuckGoTools"),
-        patch("app.services.agno_service.SQLTools"),
+        patch("app.services.agno_service.create_search_tools"),
+        patch("app.services.agno_service.create_sql_tools"),
         patch("app.services.agno_service.Agent"),
     ):
         await service.ensure_initialized()

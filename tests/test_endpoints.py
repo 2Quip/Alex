@@ -33,7 +33,7 @@ async def test_chat(client):
         )
     assert resp.status_code == 200
     data = resp.json()
-    assert data["response"] == "Hello there"
+    assert data["response"] == "<p>Hello there</p>"
     assert data["session_id"] == "sess-123"
 
 
@@ -106,7 +106,7 @@ async def test_diagnostics(client):
         )
     assert resp.status_code == 200
     data = resp.json()
-    assert data["diagnostics"] == ["Bad battery", "Faulty starter"]
+    assert data["diagnostics"] == ["<p>Bad battery</p>", "<p>Faulty starter</p>"]
     assert data["listing_id"] == "EQP-1"
     assert data["execution_time"] == 1.2
 

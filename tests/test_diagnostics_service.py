@@ -60,8 +60,8 @@ def test_parse_diagnostics_empty():
 async def test_initialize():
     service = DiagnosticsService()
     with (
-        patch("app.services.diagnostics_service.DuckDuckGoTools") as MockDDG,
-        patch("app.services.diagnostics_service.SQLTools"),
+        patch("app.services.diagnostics_service.create_search_tools") as MockDDG,
+        patch("app.services.diagnostics_service.create_sql_tools"),
         patch("app.services.diagnostics_service.Agent") as MockAgent,
     ):
         await service.initialize()
@@ -75,8 +75,8 @@ async def test_initialize():
 async def test_initialize_idempotent():
     service = DiagnosticsService()
     with (
-        patch("app.services.diagnostics_service.DuckDuckGoTools"),
-        patch("app.services.diagnostics_service.SQLTools"),
+        patch("app.services.diagnostics_service.create_search_tools"),
+        patch("app.services.diagnostics_service.create_sql_tools"),
         patch("app.services.diagnostics_service.Agent") as MockAgent,
     ):
         await service.initialize()
