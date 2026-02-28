@@ -246,12 +246,19 @@ def _sentence_boundary(text: str) -> int:
     """Return index of the first sentence boundary, or -1 if none found.
 
     A sentence boundary is after '.', '!', '?', or a newline, provided there
-    is at least one character of content before it.
+    is at least one character of content before it.  A '.' is only treated as
+    a boundary when followed by whitespace or end-of-text so dots inside URLs
+    like 's3.amazonaws.com/file.pdf' are not split on.
     """
     for i, ch in enumerate(text):
-        if ch in ".!?\n" and i > 0:
-            # Return position right after the boundary character
+        if i == 0:
+            continue
+        if ch in "!?\n":
             return i + 1
+        if ch == ".":
+            next_ch = text[i + 1] if i + 1 < len(text) else " "
+            if next_ch in " \t\n\r":
+                return i + 1
     return -1
 
 
