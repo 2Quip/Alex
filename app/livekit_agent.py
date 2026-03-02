@@ -341,12 +341,17 @@ def _extract_page_context(ctx: JobContext) -> dict | None:
 
     # Check participant metadata
     for p in ctx.room.remote_participants.values():
+        logger.debug("Participant %s metadata: %s", p.identity, p.metadata)
         if p.metadata:
             try:
-                return _json.loads(p.metadata)
+                parsed = _json.loads(p.metadata)
+                logger.info("Extracted page context from participant %s: %s", p.identity, parsed)
+                return parsed
             except (ValueError, TypeError):
                 continue
 
+    logger.warning("No page context found. Participants: %s",
+                   [p.identity for p in ctx.room.remote_participants.values()])
     return None
 
 
@@ -403,7 +408,17 @@ async def voice_agent(ctx: JobContext):
         await connect_task
         logger.info("Connected to room: %s", ctx.room.name)
 
-        # Now that we're connected, read participant metadata for page context
+        # Wait for a participant to join so we can read their metadata.
+        # The participant's token carries page context (listing_id, equipment_name, etc.)
+        # but it's not available until they actually connect to the room.
+        if not ctx.room.remote_participants:
+            logger.info("Waiting for participant to join room %s...", ctx.room.name)
+            try:
+                await asyncio.wait_for(ctx.wait_for_participant(), timeout=15.0)
+            except asyncio.TimeoutError:
+                logger.warning("No participant joined room %s within 15s", ctx.room.name)
+
+        # Now read participant metadata for page context
         page_context = _extract_page_context(ctx)
         if page_context:
             logger.info("Page context for room %s: %s", ctx.room.name, page_context)
