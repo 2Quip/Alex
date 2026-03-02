@@ -174,7 +174,7 @@ server = AgentServer(
 
 def prewarm(proc: JobProcess):
     """Prewarm function - loads VAD model ahead of time."""
-    proc.userdata["vad"] = silero.VAD.load()
+    proc.userdata["vad"] = silero.VAD.load(min_silence_duration=0.8)
     logger.info("VAD model prewarmed successfully")
 
 
@@ -395,6 +395,7 @@ async def voice_agent(ctx: JobContext):
             ),
             turn_detection=MultilingualModel(),
             vad=ctx.proc.userdata["vad"],
+            min_endpointing_delay=0.8,
             preemptive_generation=True,
         )
 
