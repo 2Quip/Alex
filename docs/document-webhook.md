@@ -148,3 +148,15 @@ The `SendDocumentTool` is loaded on all three agents when `DOCUMENT_WEBHOOK_URL`
 - Chat API (`POST /chat` and `POST /chat/stream`)
 - Diagnostics API (`POST /diagnostics`)
 - Voice Agent (LiveKit)
+
+
+ DuckDuckGo blocks cloud server IPs. Here are the best replacement options with zero new dependencies:
+
+  Option 1: SerperTools (Google Search API) — already built into Agno, only needs requests (already installed). 2,500 free queries. Just needs a SERPER_API_KEY from serper.dev.
+
+  Option 2: WebSearchTools(backend="google") — same ddgs library, different backend. Zero changes, but may still get blocked from EC2.
+
+  Option 3: TavilyTools — purpose-built for AI agents, 1,000 free/month. Needs tavily-python pip package + TAVILY_API_KEY.
+
+  I'd recommend SerperTools — it's a proper API so it works reliably from any server, it's already in the Agno package, and needs no new pip dependencies. Do you want me to switch to it? You'd just need
+   to sign up at serper.dev for an API key.

@@ -338,9 +338,15 @@ _TOOL_ROUTING_RE = re.compile(
 # "json" immediately before a brace (e.g. 'json{"query":...')
 _JSON_PREFIX_RE = re.compile(r"json\s*\{[^}]{0,500}\}", re.IGNORECASE)
 
-# Raw JSON blobs (objects and arrays)
-_JSON_BLOB_RE = re.compile(r"\{[^}]{0,2000}\}")
-_JSON_ARRAY_RE = re.compile(r"\[[\s]*\{[\s\S]{0,5000}\}[\s]*\]")
+# Raw JSON blobs (objects and arrays) — allow nested braces via [\s\S]
+_JSON_BLOB_RE = re.compile(r"\{[\s\S]{0,5000}\}")
+_JSON_ARRAY_RE = re.compile(r"\[[\s]*\{[\s\S]{0,10000}\}[\s]*\]")
+
+# Quoted JSON key-value pairs: "id":"...", "listingid":"..." etc.
+_JSON_KV_RE = re.compile(r'"[a-z_]{2,}":\s*"')
+
+# Triple-quoted strings: """..."""
+_TRIPLE_QUOTE_RE = re.compile(r'"{3}[\s\S]*?"{3}')
 
 # Quoted empty arrays/objects: "[]", "{}"
 _QUOTED_EMPTY_RE = re.compile(r'"?\[\]"?|"?\{\}"?')
@@ -457,6 +463,13 @@ def _sanitize_for_tts(text: str) -> str:
 
     # If the entire chunk is just a reasoning prefix, drop it
     if not text.strip() or _LONE_ROLE_RE.match(text.strip()):
+        return ""
+
+    # --- Phase 0c: Strip triple-quoted strings ---
+    text = _TRIPLE_QUOTE_RE.sub("", text)
+
+    # --- Phase 0d: Drop entire text if it contains raw JSON key-value pairs ---
+    if _JSON_KV_RE.search(text):
         return ""
 
     # --- Phase 1: Strip model internals ---
