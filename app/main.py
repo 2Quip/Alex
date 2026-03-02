@@ -25,6 +25,7 @@ class ChatRequest(BaseModel):
     message: str
     session_id: Optional[str] = None
     user_id: str = "default"
+    metadata: Optional[str] = None  # JSON: {"listing_id", "work_order_id", "equipment_name", "page"}
 
 
 class ChatResponse(BaseModel):
@@ -37,6 +38,7 @@ class DiagnosticsRequest(BaseModel):
     listing_id: str
     session_id: Optional[str] = None
     user_id: str = "default"
+    metadata: Optional[str] = None  # JSON: {"work_order_id", "equipment_name", "page"}
 
 
 class DiagnosticsResponse(BaseModel):
@@ -120,6 +122,7 @@ async def chat(request: ChatRequest):
             message=request.message,
             session_id=request.session_id,
             user_id=request.user_id,
+            metadata=request.metadata,
         )
         return ChatResponse(
             response=md_to_html(result["response"]),
@@ -148,6 +151,7 @@ async def chat_stream(request: ChatRequest):
                 message=request.message,
                 session_id=request.session_id,
                 user_id=request.user_id,
+                metadata=request.metadata,
             ),
             media_type="text/event-stream",
             headers={
@@ -180,6 +184,7 @@ async def diagnostics(request: DiagnosticsRequest):
             listing_id=request.listing_id,
             session_id=request.session_id,
             user_id=request.user_id,
+            metadata=request.metadata,
         )
         return DiagnosticsResponse(
             diagnostics=[md_to_html(d) for d in result["diagnostics"]],
@@ -217,4 +222,5 @@ async def livekit_token(request: TokenRequest):
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=8090)
+

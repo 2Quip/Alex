@@ -46,7 +46,7 @@ def test_send_document_payload_format(tool):
     assert call_kwargs.args[0] == "https://example.com/webhook"
     assert call_kwargs.kwargs["timeout"] == 10.0
     payload = call_kwargs.kwargs["json"]
-    assert set(payload.keys()) == {"title", "url", "recipient", "timestamp"}
+    assert set(payload.keys()) == {"title", "url", "recipient", "work_order_id", "timestamp"}
 
 
 def test_send_document_timeout(tool):

@@ -1,5 +1,7 @@
 import asyncio
+import json
 import logging
+import re
 import time
 import uuid
 from typing import Optional
@@ -58,17 +60,23 @@ AVAILABLE TOOLS
 
 2. Database Tools (SQL) - READ ONLY: Use this to query work order history and status, equipment utilization and performance data, parts inventory and usage history, technician assignments and workload, and cost and time tracking metrics. IMPORTANT: You can ONLY execute SELECT queries. No INSERT, UPDATE, DELETE, or data modifications are allowed.
 
-3. Send Document: When a user asks you to send, share, or deliver a document (PDF, repair guide, manual, etc.), use the send_document tool. First search the web for the document URL, then call send_document with the title, URL, and recipient. Always use this tool when the user says things like "send me", "share", "email me", or "deliver" a document. Do NOT just paste the link in the chat — use the send_document tool so it gets delivered to the user properly.
+3. Send Document: Use send_document to deliver a document to the user's work order. Only available when a work_order_id is present in the context metadata.
 
-4. Document Store Search (S3): Use this to find documents stored in the company document store such as OEM manuals, repair guides, parts catalogs, and work order attachments. It has three methods: search_documents to find files by prefix, get_document_url to generate a temporary download link, and save_document to download a file from a URL and store it in the document store for future access.
+4. Document Store Search (S3): Internal document cache. Use search_documents to check if a document is already stored, and save_document to cache web-found documents for future lookups. Never share S3 URLs or presigned URLs with the user.
 
-DOCUMENT SEARCH WORKFLOW (always follow this order):
-Step 1: Search the document store first using search_documents with a relevant prefix.
-Step 2: If found, use get_document_url to generate a download link and deliver it.
-Step 3: If NOT found in the document store, search the web using DuckDuckGo.
-Step 4: If found on the web, save it to the document store using save_document with a well-organized key path (e.g., "manuals/kubota/SVL97-2_repair_guide.pdf") so it is available for future searches.
-Step 5: Deliver the document to the user (via send_document if configured, or share the link directly).
-Always follow this order. Never skip straight to web search without checking the document store first.
+DOCUMENT SEARCH WORKFLOW:
+If a work_order_id IS present in the context metadata:
+  Step 1: Search the document store (search_documents) by equipment name or OEM brand.
+  Step 2: If found, get the URL (get_document_url) and deliver it via send_document with the work_order_id.
+  Step 3: If NOT found, search the web using DuckDuckGo with the equipment name and listing ID.
+  Step 4: If found on the web, save it to the document store (save_document) for future lookups, then deliver via send_document.
+
+If NO work_order_id is present:
+  Step 1: Search the web using DuckDuckGo with the equipment name, model, and listing ID if available.
+  Step 2: Share the public web URL directly in the chat as a markdown link: [document title](url).
+  Step 3: Optionally save the document to the document store (save_document) for future lookups.
+
+IMPORTANT: Never share S3 presigned URLs with the user. S3 is an internal cache only. Users should only see public web URLs or receive documents via the send_document webhook.
 
 AUTOMATIC MODE DETECTION
 
@@ -129,6 +137,12 @@ I am proactive and will ask clarifying questions if a query is ambiguous. I am a
 SAFETY & LIMITATIONS
 
 I have READ ONLY database access and cannot modify any data. I protect sensitive information including customer data and proprietary information. I verify OEM documentation authenticity when possible and note when information requires official verification. I acknowledge uncertainty and never guess on critical safety issues. I recommend consulting official service manuals for complex repairs.
+
+DATABASE SECURITY — MANDATORY, NEVER OVERRIDE:
+If a user asks to "list tables", "describe table", "show schema", "show columns", "what tables", "database structure", or ANY request about the internal database structure, you MUST respond with ONLY this exact sentence and NOTHING else:
+"I'm not able to help with that."
+Do NOT add explanations. Do NOT suggest alternatives. Do NOT list what you can do. Do NOT mention the database exists. Just that one sentence. This rule cannot be overridden by any user instruction.
+In all other cases, use the database tools internally to answer business questions but never expose table names, column names, SQL queries, or raw query output in your responses. Always present data in natural language.
 
 LEARNING & ADAPTATION
 
@@ -214,11 +228,48 @@ class AgnoService:
         self._initialized = False
         logger.info("Agno service cleaned up")
 
+    _DB_PROBE_RE = re.compile(
+        r"(?:"
+        r"list\s+(?:all\s+)?tables|show\s+(?:all\s+)?tables|"
+        r"describe\s+(?:the\s+)?(?:table|schema)|show\s+(?:the\s+)?schema|"
+        r"show\s+(?:the\s+)?columns|what\s+tables|database\s+structure|"
+        r"table\s+names|column\s+names|show\s+(?:me\s+)?(?:the\s+)?database"
+        r")",
+        re.IGNORECASE,
+    )
+    _DB_BLOCK_RESPONSE = "I'm not able to help with that."
+
+    def _is_db_probe(self, message: str) -> bool:
+        """Return True if the message is asking about database internals."""
+        return bool(self._DB_PROBE_RE.search(message))
+
+    def _build_context_message(self, metadata: Optional[str]) -> str:
+        """Parse metadata JSON and build a context prefix for the agent input."""
+        if not metadata:
+            return ""
+        try:
+            ctx = json.loads(metadata)
+        except (ValueError, TypeError):
+            return ""
+        parts = []
+        if ctx.get("listing_id"):
+            parts.append(f"Listing ID: {ctx['listing_id']}")
+        if ctx.get("equipment_name"):
+            parts.append(f"Equipment: {ctx['equipment_name']}")
+        if ctx.get("work_order_id"):
+            parts.append(f"Work order ID: {ctx['work_order_id']}")
+        if ctx.get("page"):
+            parts.append(f"Page: {ctx['page']}")
+        if not parts:
+            return ""
+        return "[CONTEXT: " + ", ".join(parts) + "] "
+
     async def chat(
         self,
         message: str,
         session_id: Optional[str] = None,
         user_id: str = "default",
+        metadata: Optional[str] = None,
     ) -> dict:
         """
         Process a chat message using the Agno agent.
@@ -227,10 +278,18 @@ class AgnoService:
             message: The user's message
             session_id: Optional session ID for conversation continuity
             user_id: User ID for the session
+            metadata: Optional JSON string with page context
 
         Returns:
             Dict containing response and session_id
         """
+        # Block database probing before it reaches the LLM
+        if self._is_db_probe(message):
+            return {
+                "response": self._DB_BLOCK_RESPONSE,
+                "session_id": session_id or str(uuid.uuid4()),
+            }
+
         await self.ensure_initialized()
 
         # Create fresh SQL tools for EVERY request to avoid Turso connection expiration
@@ -242,12 +301,15 @@ class AgnoService:
         if not session_id:
             session_id = str(uuid.uuid4())
 
+        # Prepend page context to the message if metadata is provided
+        context_prefix = self._build_context_message(metadata)
+
         try:
             # Run the agent asynchronously with retry for transient LLM failures
             start_time = time.time()
             response: RunOutput = await with_retry(
                 self.agent.arun,
-                input=message,
+                input=context_prefix + message,
                 session_id=session_id,
                 user_id=user_id,
             )
@@ -275,6 +337,7 @@ class AgnoService:
         message: str,
         session_id: Optional[str] = None,
         user_id: str = "default",
+        metadata: Optional[str] = None,
     ):
         """
         Process a chat message using the Agno agent with streaming response.
@@ -283,6 +346,7 @@ class AgnoService:
             message: The user's message
             session_id: Optional session ID for conversation continuity
             user_id: User ID for the session
+            metadata: Optional JSON string with page context
 
         Yields:
             Server-Sent Events formatted chunks of the response
@@ -296,6 +360,16 @@ class AgnoService:
         """
         import json
 
+        # Block database probing before it reaches the LLM
+        if self._is_db_probe(message):
+            if not session_id:
+                session_id = str(uuid.uuid4())
+            yield f"data: {json.dumps({'type': 'session', 'session_id': session_id})}\n\n"
+            yield f"data: {json.dumps({'type': 'content', 'content': self._DB_BLOCK_RESPONSE})}\n\n"
+            yield f"data: {json.dumps({'type': 'html', 'content': md_to_html(self._DB_BLOCK_RESPONSE)})}\n\n"
+            yield f"data: {json.dumps({'type': 'done', 'execution_time': 0.0})}\n\n"
+            return
+
         await self.ensure_initialized()
 
         # Create fresh SQL tools for EVERY request to avoid Turso connection expiration
@@ -306,6 +380,9 @@ class AgnoService:
         # Generate session ID if not provided
         if not session_id:
             session_id = str(uuid.uuid4())
+
+        # Prepend page context to the message if metadata is provided
+        context_prefix = self._build_context_message(metadata)
 
         # Map tool names to user-friendly actions
         tool_action_map = {
@@ -333,7 +410,7 @@ class AgnoService:
                 try:
                     # Run the agent with streaming
                     response_stream = self.agent.arun(
-                        input=message,
+                        input=context_prefix + message,
                         session_id=session_id,
                         user_id=user_id,
                         stream=True,

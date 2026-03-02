@@ -246,16 +246,16 @@ def _sentence_boundary(text: str) -> int:
     """Return index of the first sentence boundary, or -1 if none found.
 
     A sentence boundary is after '.', '!', '?', or a newline, provided there
-    is at least one character of content before it.  A '.' is only treated as
-    a boundary when followed by whitespace or end-of-text so dots inside URLs
-    like 's3.amazonaws.com/file.pdf' are not split on.
+    is at least one character of content before it.  '.' and '?' are only
+    treated as boundaries when followed by whitespace or end-of-text so they
+    don't split inside URLs like 's3.amazonaws.com/key?AWSAccessKeyId=...'.
     """
     for i, ch in enumerate(text):
         if i == 0:
             continue
-        if ch in "!?\n":
+        if ch in "!\n":
             return i + 1
-        if ch == ".":
+        if ch in ".?":
             next_ch = text[i + 1] if i + 1 < len(text) else " "
             if next_ch in " \t\n\r":
                 return i + 1
@@ -323,8 +323,8 @@ _TOOL_ROUTING_RE = re.compile(
 _JSON_PREFIX_RE = re.compile(r"json\s*\{[^}]{0,500}\}", re.IGNORECASE)
 
 # Raw JSON blobs (objects and arrays)
-_JSON_BLOB_RE = re.compile(r"\{[^}]{0,500}\}")
-_JSON_ARRAY_RE = re.compile(r"\[[\s]*\{[\s\S]{0,2000}\}[\s]*\]")
+_JSON_BLOB_RE = re.compile(r"\{[^}]{0,2000}\}")
+_JSON_ARRAY_RE = re.compile(r"\[[\s]*\{[\s\S]{0,5000}\}[\s]*\]")
 
 # Quoted empty arrays/objects: "[]", "{}"
 _QUOTED_EMPTY_RE = re.compile(r'"?\[\]"?|"?\{\}"?')
@@ -354,7 +354,20 @@ _REASONING_KEYWORDS = re.compile(
     # System prompt echo
     r"^You are Alex, a voice assistant|"
     r"^RULES:|^TOOLS:|^CURRENT CONTEXT:|"
-    r"Use list_tables|Use describe_table|search the document store"
+    r"Use list_tables|Use describe_table|search the document store|"
+    # Internal search/tool narration
+    r"\bno results\b|searches? failed|fallback|internal docs|"
+    r"\bcatalog site\b|given inability|respond that|unable to (?:locate|find|retrieve)|"
+    r"couldn't (?:find|locate|retrieve)|could not (?:find|locate|retrieve)|"
+    r"search(?:ed|ing) (?:for|the)|no (?:matching|relevant) |"
+    # Tool result echo patterns
+    r"\bresults returned\b|\bsnippet\b|\"url\"|\"title\"|\"results\"|"
+    # S3 / presigned URL fragments
+    r"AWSAccessKeyId|Signature=|Expires=|\bpresigned\b|valid for \d+ minutes?|"
+    r"Download URL for|get_?document_?url|search_?documents|save_?document|"
+    # More model self-talk
+    r"\bnow we have\b|try again|format problematic|correct key|"
+    r"returned earlier|we can try|use (?:get|send|search|save)"
     r")",
     re.IGNORECASE,
 )
@@ -370,11 +383,21 @@ _REASONING_SENTENCE_PATTERNS = [
     r"^Error ",
     r"^Not (?:shown|captured)\b",
     r"^Need to ",
-    r"^Could (?:try|search|also|attempt|be)",
+    r"^Could (?:try|search|also|attempt|be|we)",
     r"^Should be (?:okay|fine|good)",
     r"^(?:Search|Query|Check|Try|Fetch) ",
     r"^(?:The )?(?:ID|item|token) (?:is|looks|might|could)",
     r"^Great\.\s*We ",
+    # Tool/search narration
+    r"^So no ",
+    r"^No (?:results|matches|documents|data)",
+    r"^All (?:searches|queries|attempts) ",
+    r"^But maybe ",
+    r"^Given (?:inability|that|the) ",
+    r"^(?:Cannot|Can't|Couldn't) (?:find|locate|retrieve|access) ",
+    r"^(?:Now we |Use |Anyway )",
+    r"^Download URL ",
+    r"^The URL ",
 ]
 _REASONING_SENTENCE_RE = re.compile(
     "|".join(_REASONING_SENTENCE_PATTERNS), re.IGNORECASE

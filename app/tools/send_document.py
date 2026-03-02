@@ -53,16 +53,18 @@ class SendDocumentTool(Toolkit):
         # All retries exhausted — raise the last exception
         raise last_exception
 
-    def send_document(self, title: str, url: str, recipient: str = "") -> str:
+    def send_document(self, title: str, url: str, recipient: str = "", work_order_id: str = "") -> str:
         """Send a document URL to the user via webhook.
 
         Use this tool when the user asks you to send, share, or deliver a document,
-        PDF, manual, repair guide, or any file link.
+        PDF, manual, repair guide, or any file link. Only send documents when the user
+        is on a work order page. Include the work_order_id from CURRENT CONTEXT.
 
         Args:
             title: Document title (e.g., "Kubota SVL97-2 Repair Guide")
             url: Full URL to the document
             recipient: Optional recipient identifier (email, phone, or user ID)
+            work_order_id: The work order ID to associate the document with
 
         Returns:
             A message confirming whether the document was sent successfully.
@@ -71,6 +73,7 @@ class SendDocumentTool(Toolkit):
             "title": title,
             "url": url,
             "recipient": recipient,
+            "work_order_id": work_order_id,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 

@@ -73,13 +73,17 @@ Never repeat yourself. Never read raw data, JSON, coordinates, URLs, or IDs alou
 
 When you get data from tools, summarize it naturally. For example instead of reading a JSON array say "You've got a John Deere 333G and a Kubota SVL97." Never say raw field names, latitude, longitude, or equipment IDs unless the user specifically asks for them.
 
-NEVER read a URL or link aloud. Instead, always use send_document to deliver the file to the user and say something like "I'm sending that document to you now."
+NEVER read a URL or link aloud.
 
 TOOLS:
-You have database access (read only, SELECT only). Use list_tables then describe_table before querying. You have web search. You have a document store with search_documents, get_document_url, and save_document. You have send_document for delivering files. Search the document store before the web.
+You have database access (read only, SELECT only). Use list_tables then describe_table before querying. You have web search. You have a document store with search_documents, get_document_url, and save_document. You have send_document for delivering files.
+
+Never reveal database internals to users. Never mention table names, column names, schema, or SQL queries. If asked about the database structure, just say "I'm not able to help with that." and nothing else. Do not explain what you can do instead.
 
 DOCUMENT DELIVERY:
-When a user asks for a document, manual, or guide: search the document store first, then the web. Once you have the URL, call send_document to deliver it. Never read the URL aloud. Just say "I found that document and I'm sending it to you now."
+If CURRENT CONTEXT has a work_order_id: search the document store first, then the web. Once you have the URL, call send_document with the work_order_id. Say "I found that document and I'm sending it to you now."
+If CURRENT CONTEXT has NO work_order_id: search the web using the equipment name and listing ID. Say "I found a document for that, let me send it over." Never read the URL aloud.
+Never share S3 presigned URLs. S3 is an internal cache only.
 
 Keep it short and natural like a phone call.
 """
@@ -408,6 +412,8 @@ async def voice_agent(ctx: JobContext):
                 context_lines.append(f"The user is currently viewing listing ID: {page_context['listing_id']}")
             if page_context.get("equipment_name"):
                 context_lines.append(f"Equipment: {page_context['equipment_name']}")
+            if page_context.get("work_order_id"):
+                context_lines.append(f"Work order ID: {page_context['work_order_id']}")
             if page_context.get("page"):
                 context_lines.append(f"Page: {page_context['page']}")
             if context_lines:
@@ -416,6 +422,7 @@ async def voice_agent(ctx: JobContext):
                     + "\n\nCURRENT CONTEXT:\n"
                     + ". ".join(context_lines)
                     + ".\nWhen the user says \"this item\" or \"this equipment\", they mean the item above. Query the database for it directly without asking."
+                    + "\nIf a work_order_id is present, use it when calling send_document."
                 )
 
         # Start the voice session with the AlexAgent (triggers on_enter greeting)

@@ -42,9 +42,11 @@ GROQ_API_KEY = settings.GROQ_API_KEY
 
 # System prompt for the diagnostics agent
 DIAGNOSTICS_SYSTEM_PROMPT = """
-You are Alex, an AI diagnostic specialist. Query the listing table for the id. Provide exactly 2 diagnostics: the most likely cause first, then one alternative. Do not use web search. No emojis.
+You are Alex, an AI diagnostic specialist. Query the database for the listing ID provided. Provide exactly 2 diagnostics: the most likely cause first, then one alternative. Do not use web search. No emojis.
 
 Each diagnostic must start with the likelihood ("Most likely" or "Also possible"), then the diagnosis, cause, how to check, and fix. Keep each diagnostic to 3-4 sentences maximum. Be concise. Separate each diagnostic with a blank line.
+
+Never reveal database internals to users. Never mention table names, column names, schema, or SQL queries in your response. If asked about the database structure, just say "I'm not able to help with that."
 """
 
 
@@ -120,6 +122,7 @@ class DiagnosticsService:
         listing_id: str,
         session_id: Optional[str] = None,
         user_id: str = "default",
+        metadata: Optional[str] = None,
     ) -> dict:
         """
         Process a diagnostics request using the Agno agent with structured output.
@@ -129,6 +132,7 @@ class DiagnosticsService:
             listing_id: The listing identifier to analyze
             session_id: Optional session ID for conversation continuity
             user_id: User ID for the session
+            metadata: Optional JSON string with page context
 
         Returns:
             Dict containing structured diagnostics and session_id
@@ -144,8 +148,19 @@ class DiagnosticsService:
         if not session_id:
             session_id = str(uuid.uuid4())
 
-        # Construct the diagnostic request message
-        diagnostic_message = f"Listing ID: {listing_id}. Issue: {message}"
+        # Construct the diagnostic request message with optional context
+        context = ""
+        if metadata:
+            import json
+            try:
+                ctx = json.loads(metadata)
+                if ctx.get("work_order_id"):
+                    context = f" Work order ID: {ctx['work_order_id']}."
+                if ctx.get("equipment_name"):
+                    context += f" Equipment: {ctx['equipment_name']}."
+            except (ValueError, TypeError):
+                pass
+        diagnostic_message = f"Listing ID: {listing_id}.{context} Issue: {message}"
 
         try:
             start_time = time.time()

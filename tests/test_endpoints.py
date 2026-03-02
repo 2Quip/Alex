@@ -70,7 +70,7 @@ async def test_chat_service_error(client):
 
 @pytest.mark.asyncio
 async def test_chat_stream(client):
-    async def fake_stream(message, session_id, user_id):
+    async def fake_stream(message, session_id, user_id, metadata=None):
         yield f"data: {json.dumps({'type': 'session', 'session_id': 'sess-1'})}\n\n"
         yield f"data: {json.dumps({'type': 'content', 'content': 'Hello'})}\n\n"
         yield f"data: {json.dumps({'type': 'done', 'execution_time': 0.5})}\n\n"
