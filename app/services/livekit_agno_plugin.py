@@ -138,6 +138,10 @@ class AgnoStream(llm.LLMStream):
 
                     buffer += raw
 
+                    # Pre-split on reasoning prefix tokens so they
+                    # act as sentence boundaries (newline = boundary)
+                    buffer = _PREFIX_BOUNDARY_RE.sub("\n", buffer)
+
                     # Flush complete sentences from the buffer
                     while True:
                         idx = _sentence_boundary(buffer)
@@ -247,8 +251,9 @@ def _sentence_boundary(text: str) -> int:
 
     A sentence boundary is after '.', '!', '?', or a newline, provided there
     is at least one character of content before it.  '.' and '?' are only
-    treated as boundaries when followed by whitespace or end-of-text so they
-    don't split inside URLs like 's3.amazonaws.com/key?AWSAccessKeyId=...'.
+    treated as boundaries when followed by whitespace, an uppercase letter,
+    or end-of-text — so they don't split inside URLs like
+    's3.amazonaws.com/key?AWSAccessKeyId=...'.
     """
     for i, ch in enumerate(text):
         if i == 0:
@@ -258,6 +263,9 @@ def _sentence_boundary(text: str) -> int:
         if ch in ".?":
             next_ch = text[i + 1] if i + 1 < len(text) else " "
             if next_ch in " \t\n\r":
+                return i + 1
+            # ".A" or "?B" — new sentence glued to previous without a space
+            if next_ch.isupper():
                 return i + 1
     return -1
 
@@ -289,9 +297,17 @@ _REASONING_PREFIXES = (
     "thinking", "thought", "reasoning", "internal", "scratchpad",
 )
 
-# Bare prefix at the start of text: "analysisWe have..." → strip the prefix
+# Bare prefix anywhere in text: "analysisWe have..." or "...assistantcommentaryI've found..."
 _BARE_PREFIX_RE = re.compile(
-    r"^(?:" + "|".join(_REASONING_PREFIXES) + r")",
+    r"(?:" + "|".join(_REASONING_PREFIXES) + r")",
+    re.IGNORECASE,
+)
+
+# Insert newlines before reasoning prefixes so they act as sentence boundaries
+# during buffered streaming. This splits "createdat.assistantfinalI've found..."
+# into separate sentences that can be individually filtered.
+_PREFIX_BOUNDARY_RE = re.compile(
+    r"(?=" + "|".join(_REASONING_PREFIXES) + r")",
     re.IGNORECASE,
 )
 
@@ -398,6 +414,15 @@ _REASONING_SENTENCE_PATTERNS = [
     r"^(?:Now we |Use |Anyway )",
     r"^Download URL ",
     r"^The URL ",
+    # Model reasoning about the user or its own behavior
+    r"^The user (?:wants|is asking|needs|asked|requires|said) ",
+    r"^Allowed ",
+    r"^(?:But )?(?:we|I) can (?:guess|assume|infer|try|check) ",
+    r"^(?:Typical|Common|Expected|Known) (?:columns?|fields?|tables?) ",
+    r"^(?:My|The) (?:task|job|goal|role|approach) ",
+    r"^(?:First|Next|Then|Finally),? (?:I|we|let) ",
+    r"^(?:I|We) (?:need|should|must|will|shall) ",
+    r"^(?:Looking|Checking|Querying|Searching|Fetching) ",
 ]
 _REASONING_SENTENCE_RE = re.compile(
     "|".join(_REASONING_SENTENCE_PATTERNS), re.IGNORECASE
