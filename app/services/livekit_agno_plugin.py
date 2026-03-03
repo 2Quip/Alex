@@ -293,8 +293,10 @@ def _extract_content(event: Any) -> str | None:
 #   "analysisWe have trouble..."  "assistantcommentaryWe got an error..."
 # ---------------------------------------------------------------------------
 _REASONING_PREFIXES = (
-    "analysis", "assistantcommentary", "assistantfinal", "assistantanalysis",
+    "analysis", "assistant", "assistantcommentary", "assistantfinal",
+    "assistantanalysis", "assistantresponse", "assistantthinking",
     "thinking", "thought", "reasoning", "internal", "scratchpad",
+    "commentary", "reflection",
 )
 
 # Bare prefix anywhere in text: "analysisWe have..." or "...assistantcommentaryI've found..."
@@ -303,11 +305,12 @@ _BARE_PREFIX_RE = re.compile(
     re.IGNORECASE,
 )
 
-# Insert newlines before reasoning prefixes so they act as sentence boundaries
-# during buffered streaming. This splits "createdat.assistantfinalI've found..."
+# Insert newlines before reasoning prefixes and json blobs so they act as
+# sentence boundaries during buffered streaming. This splits
+# "createdat.assistantfinalI've found..." and "repair guide.json{}{...}"
 # into separate sentences that can be individually filtered.
 _PREFIX_BOUNDARY_RE = re.compile(
-    r"(?=" + "|".join(_REASONING_PREFIXES) + r")",
+    r"(?=" + "|".join(_REASONING_PREFIXES) + r"|json\s*\{)",
     re.IGNORECASE,
 )
 
@@ -335,8 +338,11 @@ _TOOL_ROUTING_RE = re.compile(
     r"(?:to=functions\.\S+|functions\.\S+\s*to=\S*)", re.IGNORECASE
 )
 
-# "json" immediately before a brace (e.g. 'json{"query":...')
-_JSON_PREFIX_RE = re.compile(r"json\s*\{[^}]{0,500}\}", re.IGNORECASE)
+# "json" immediately before a brace (e.g. 'json{"query":...' or 'json{}{"columns":...}')
+_JSON_PREFIX_RE = re.compile(r"json\s*(?:\{\})*\{[^}]{0,500}\}", re.IGNORECASE)
+
+# Standalone "json{}" tokens (empty JSON objects the model spits out)
+_JSON_EMPTY_OBJ_RE = re.compile(r"json\s*\{\}", re.IGNORECASE)
 
 # Raw JSON blobs (objects and arrays) — allow nested braces via [\s\S]
 _JSON_BLOB_RE = re.compile(r"\{[\s\S]{0,5000}\}")
@@ -389,7 +395,15 @@ _REASONING_KEYWORDS = re.compile(
     r"Download URL for|get_?document_?url|search_?documents|save_?document|"
     # More model self-talk
     r"\bnow we have\b|try again|format problematic|correct key|"
-    r"returned earlier|we can try|use (?:get|send|search|save)"
+    r"returned earlier|we can try|use (?:get|send|search|save)|"
+    # Model self-instructions
+    r"\brespond (?:succinctly|briefly|concisely|naturally|with)\b|"
+    r"\bmention (?:specs|details|that|the)\b|"
+    r"\bsummarize (?:the|this|it|naturally)\b|"
+    r"list of tables|got (?:list|the) of|"
+    # Raw data patterns (columns, rows from query results)
+    r"\"columns\"|\"rows\"|\"fields\"|\"values\"|"
+    r"\bcolumns?:\s*\[|\brows?:\s*\["
     r")",
     re.IGNORECASE,
 )
@@ -429,6 +443,16 @@ _REASONING_SENTENCE_PATTERNS = [
     r"^(?:First|Next|Then|Finally),? (?:I|we|let) ",
     r"^(?:I|We) (?:need|should|must|will|shall) ",
     r"^(?:Looking|Checking|Querying|Searching|Fetching) ",
+    # Model self-instructions
+    r"^Now respond ",
+    r"^Respond (?:with|succinctly|briefly|naturally|to) ",
+    r"^Summarize ",
+    r"^Mention ",
+    r"^(?:Output|Format|Present|Return) (?:the|this|it|a) ",
+    r"^(?:Here|There) (?:is|are) (?:the|a) (?:result|data|output|response) ",
+    r"^We got ",
+    r"^Got (?:the|a|list|it) ",
+    r"^The (?:query|result|data|output|response) ",
 ]
 _REASONING_SENTENCE_RE = re.compile(
     "|".join(_REASONING_SENTENCE_PATTERNS), re.IGNORECASE
@@ -457,8 +481,7 @@ def _sanitize_for_tts(text: str) -> str:
     text = _URL_RE.sub("I'm sending you a link", text)
 
     # --- Phase 0b: Strip bare reasoning prefixes (no angle brackets) ---
-    # e.g. "analysisWe have trouble..." → "We have trouble..."
-    # Then the reasoning sentence filter below will catch the rest.
+    # e.g. "assistantIt's a Heavy-Duty..." → "It's a Heavy-Duty..."
     text = _BARE_PREFIX_RE.sub("", text)
 
     # If the entire chunk is just a reasoning prefix, drop it
@@ -485,6 +508,8 @@ def _sanitize_for_tts(text: str) -> str:
     # Remove tool-call routing
     text = _TOOL_ROUTING_RE.sub("", text)
 
+    # Remove standalone "json{}" tokens
+    text = _JSON_EMPTY_OBJ_RE.sub("", text)
     # Remove "json{...}" patterns
     text = _JSON_PREFIX_RE.sub("", text)
     # Remove raw JSON blobs and arrays
