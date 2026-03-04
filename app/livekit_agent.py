@@ -30,7 +30,7 @@ from agno.agent import Agent as AgnoAgent
 from agno.db.sqlite import SqliteDb
 from agno.models.openrouter import OpenRouter
 from app.tools.search import create_search_tools
-from app.tools.sql_tool import create_sql_tools as _create_sql_tools
+from app.tools.sql_tool import create_sql_tools as _create_sql_tools, fetch_equipment_summary
 from dotenv import load_dotenv
 from livekit import api, rtc
 from livekit.agents import (
@@ -84,6 +84,8 @@ DOCUMENT DELIVERY:
 If CURRENT CONTEXT has a work_order_id: search the document store first, then the web. Once you have the URL, call send_document with the work_order_id. Say "I found that document and I'm sending it to you now."
 If CURRENT CONTEXT has NO work_order_id: search the web using the equipment name and listing ID. Say "I found a document for that, let me send it over." Never read the URL aloud.
 Never share S3 presigned URLs. S3 is an internal cache only.
+
+When equipment details are pre-loaded in CURRENT CONTEXT, use them directly for part lookups, troubleshooting, and specifications — do not re-query the database for basic equipment info.
 
 Keep it short and natural like a phone call.
 """
@@ -432,6 +434,26 @@ async def voice_agent(ctx: JobContext):
                 context_lines.append(f"Work order ID: {page_context['work_order_id']}")
             if page_context.get("page"):
                 context_lines.append(f"Page: {page_context['page']}")
+            # Pre-fetch equipment details from DB if listing_id is present
+            listing_id = page_context.get("listing_id")
+            if listing_id:
+                equip = fetch_equipment_summary(_get_engine(), listing_id)
+                if equip:
+                    equip_parts = [
+                        f"Make: {equip['make']}" if equip.get("make") else None,
+                        f"Model: {equip['model']}" if equip.get("model") else None,
+                        f"Year: {equip['year']}" if equip.get("year") else None,
+                        f"Serial: {equip['serial_number']}" if equip.get("serial_number") else None,
+                        f"Hours: {equip['operating_hours']}" if equip.get("operating_hours") else None,
+                        f"Category: {equip['category']}" if equip.get("category") else None,
+                    ]
+                    equip_str = ", ".join(p for p in equip_parts if p)
+                    context_lines.append(f"Equipment from database: {equip_str}")
+                    context_lines.append(
+                        "Use these equipment details directly for part lookups and troubleshooting without re-querying"
+                    )
+                    logger.info("Pre-fetched equipment for listing %s: %s", listing_id, equip_str)
+
             if context_lines:
                 agno_agent.instructions = (
                     agno_agent.instructions

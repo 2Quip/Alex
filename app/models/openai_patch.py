@@ -71,9 +71,10 @@ class PatchedOpenAIChat(OpenAIChat):
     def invoke_stream(self, *args: Any, **kwargs: Any) -> Any:
         if "messages" in kwargs:
             kwargs["messages"] = self._truncate_tool_call_ids(kwargs["messages"])
-        return super().invoke_stream(*args, **kwargs)
+        yield from super().invoke_stream(*args, **kwargs)
 
     async def ainvoke_stream(self, *args: Any, **kwargs: Any) -> Any:
         if "messages" in kwargs:
             kwargs["messages"] = self._truncate_tool_call_ids(kwargs["messages"])
-        return await super().ainvoke_stream(*args, **kwargs)
+        async for chunk in super().ainvoke_stream(*args, **kwargs):
+            yield chunk

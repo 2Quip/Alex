@@ -26,7 +26,7 @@ from app.core.logging import logger_hook
 from app.core.retry import MAX_RETRIES, RETRY_BACKOFF, _is_retryable, with_retry
 from app.tools.s3_search import S3SearchTool
 from app.tools.send_document import SendDocumentTool
-from app.tools.sql_tool import create_sql_tools
+from app.tools.sql_tool import create_sql_tools, fetch_equipment_summary
 
 logger = logging.getLogger(__name__)
 
@@ -148,6 +148,8 @@ LEARNING & ADAPTATION
 
 I remember context within a session so users can ask follow-up questions. If a technician is working on a specific work order, I keep that context. I learn user preferences such as preferred level of detail. I suggest related information that might be helpful.
 
+When equipment details are pre-loaded in CURRENT CONTEXT, use them directly for part lookups, troubleshooting, and specifications — do not re-query the database for basic equipment info.
+
 You are Alex - efficient, knowledgeable, and always focused on helping users get their work done safely and effectively. Use plain text for general responses and markdown tables for structured multi-column data. Never use emojis or decorative symbols.
 """
 
@@ -260,6 +262,25 @@ class AgnoService:
             parts.append(f"Work order ID: {ctx['work_order_id']}")
         if ctx.get("page"):
             parts.append(f"Page: {ctx['page']}")
+        # Pre-fetch equipment details from DB if listing_id is present
+        listing_id = ctx.get("listing_id")
+        if listing_id:
+            equip = fetch_equipment_summary(ENGINE, listing_id)
+            if equip:
+                equip_parts = [
+                    f"Make: {equip['make']}" if equip.get("make") else None,
+                    f"Model: {equip['model']}" if equip.get("model") else None,
+                    f"Year: {equip['year']}" if equip.get("year") else None,
+                    f"Serial: {equip['serial_number']}" if equip.get("serial_number") else None,
+                    f"Hours: {equip['operating_hours']}" if equip.get("operating_hours") else None,
+                    f"Category: {equip['category']}" if equip.get("category") else None,
+                ]
+                equip_str = ", ".join(p for p in equip_parts if p)
+                parts.append(f"Equipment from database: {equip_str}")
+                parts.append(
+                    "Use these equipment details directly for part lookups and troubleshooting without re-querying"
+                )
+
         if not parts:
             return ""
         return "[CONTEXT: " + ", ".join(parts) + "] "

@@ -60,3 +60,40 @@ def create_sql_tools(db_engine: Engine) -> ReadOnlySQLTools:
     Call this per-request to avoid connection expiration with Turso/libSQL.
     """
     return ReadOnlySQLTools(db_engine=db_engine)
+
+
+def fetch_equipment_summary(db_engine: Engine, listing_id: str) -> dict | None:
+    """Pre-fetch equipment details from the listing table.
+
+    Returns a dict with name, make, model, year, serial_number,
+    operating_hours, and category — or None on failure.
+    Retries once after disposing stale pool connections (Turso/libSQL).
+    """
+    from sqlalchemy import text
+
+    _query = text(
+        "SELECT l.name, l.make, l.model, l.year, l.serial_number, "
+        "l.operating_hours, c.name AS category "
+        "FROM listing l LEFT JOIN category c ON l.category_id = c.id "
+        "WHERE l.id = :lid LIMIT 1"
+    )
+
+    for attempt in range(2):
+        try:
+            with db_engine.connect() as conn:
+                row = conn.execute(_query, {"lid": listing_id}).mappings().first()
+            if not row:
+                logger.info("No listing found for id=%s", listing_id)
+                return None
+            return dict(row)
+        except Exception:
+            if attempt == 0:
+                logger.debug("Stale connection for pre-fetch, disposing pool and retrying")
+                try:
+                    db_engine.dispose()
+                except Exception:
+                    pass
+            else:
+                logger.warning("Failed to pre-fetch equipment for listing %s", listing_id, exc_info=True)
+                return None
+    return None
