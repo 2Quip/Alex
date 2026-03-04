@@ -56,7 +56,7 @@ class DiagnosticsService:
     def __init__(self):
         self.agent: Optional[Agent] = None
         self._initialized = False
-        self.ddg_tools = None
+        self.search_tools = None
         self._extra_tools: list = []
 
     def _create_sql_tools(self):
@@ -65,13 +65,13 @@ class DiagnosticsService:
         return create_sql_tools(db_engine=ENGINE)
 
     async def initialize(self):
-        """Initialize the diagnostics agent with DuckDuckGo search and SQL tools"""
+        """Initialize the diagnostics agent with web search and SQL tools"""
         if self._initialized:
             return
 
         try:
             # Initialize search tools
-            self.ddg_tools = create_search_tools()
+            self.search_tools = create_search_tools()
             
             # Create fresh SQL tools instance
             sql_tools = self._create_sql_tools()
@@ -87,7 +87,7 @@ class DiagnosticsService:
                     secret_access_key=settings.S3_SECRET_ACCESS_KEY,
                     presigned_url_expiry=settings.S3_PRESIGNED_URL_EXPIRY,
                 ))
-            tools = [self.ddg_tools, sql_tools] + self._extra_tools
+            tools = [self.search_tools, sql_tools] + self._extra_tools
 
             # Create the agent — Gemini 2.5 Flash via OpenRouter for speed
             self.agent = Agent(
@@ -142,7 +142,7 @@ class DiagnosticsService:
         # Create fresh SQL tools for this request
         logger.debug("Creating fresh SQL tools for diagnostics request")
         fresh_sql_tools = self._create_sql_tools()
-        self.agent.tools = [self.ddg_tools, fresh_sql_tools] + self._extra_tools
+        self.agent.tools = [self.search_tools, fresh_sql_tools] + self._extra_tools
 
         # Generate session ID if not provided
         if not session_id:

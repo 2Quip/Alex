@@ -27,7 +27,7 @@ import httpx
 
 from agno.agent import Agent
 from agno.run.agent import RunOutput
-from agno.tools.duckduckgo import DuckDuckGoTools  # for mock spec
+from agno.tools.tavily import TavilyTools  # for mock spec
 from app.tools.sql_tool import ReadOnlySQLTools as SQLTools
 
 from app.services.agno_service import AgnoService
@@ -44,8 +44,8 @@ def mock_agent():
 
 
 @pytest.fixture
-def mock_ddg_tools():
-    return MagicMock(spec=DuckDuckGoTools)
+def mock_search_tools():
+    return MagicMock(spec=TavilyTools)
 
 
 @pytest.fixture
@@ -54,22 +54,22 @@ def mock_sql_tools():
 
 
 @pytest.fixture
-def agno_service_instance(mock_agent, mock_ddg_tools, mock_sql_tools):
+def agno_service_instance(mock_agent, mock_search_tools, mock_sql_tools):
     """Fresh AgnoService with mocked dependencies — not the global singleton."""
     service = AgnoService()
     service.agent = mock_agent
-    service.ddg_tools = mock_ddg_tools
+    service.search_tools = mock_search_tools
     service._initialized = True
     service._create_sql_tools = MagicMock(return_value=mock_sql_tools)
     return service
 
 
 @pytest.fixture
-def diagnostics_service_instance(mock_agent, mock_ddg_tools, mock_sql_tools):
+def diagnostics_service_instance(mock_agent, mock_search_tools, mock_sql_tools):
     """Fresh DiagnosticsService with mocked dependencies."""
     service = DiagnosticsService()
     service.agent = mock_agent
-    service.ddg_tools = mock_ddg_tools
+    service.search_tools = mock_search_tools
     service._initialized = True
     service._create_sql_tools = MagicMock(return_value=mock_sql_tools)
     return service

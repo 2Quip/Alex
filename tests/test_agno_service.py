@@ -173,12 +173,12 @@ async def test_chat_stream_yields_events(agno_service_instance):
 async def test_chat_stream_tool_events(agno_service_instance):
     tool_started = MagicMock(spec=ToolCallStartedEvent)
     tool_started.tool = MagicMock()
-    tool_started.tool.tool_name = "duckduckgo_search"
+    tool_started.tool.tool_name = "web_search_using_tavily"
     tool_started.tool.tool_args = "test query"
 
     tool_completed = MagicMock(spec=ToolCallCompletedEvent)
     tool_completed.tool = MagicMock()
-    tool_completed.tool.tool_name = "duckduckgo_search"
+    tool_completed.tool.tool_name = "web_search_using_tavily"
     tool_completed.tool.result = "search results"
 
     async def fake_stream(*args, **kwargs):

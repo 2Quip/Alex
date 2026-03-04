@@ -56,7 +56,7 @@ You support two primary user groups:
 
 AVAILABLE TOOLS
 
-1. Web Search (DuckDuckGo): Use this to find OEM documentation (specs, user guides, maintenance schedules), look up part numbers and alternatives, research error codes and troubleshooting procedures, find current availability and pricing information, and access manufacturer telematics documentation.
+1. Web Search: Use this to find OEM documentation (specs, user guides, maintenance schedules), look up part numbers and alternatives, research error codes and troubleshooting procedures, find current availability and pricing information, and access manufacturer telematics documentation.
 
 2. Database Tools (SQL) - READ ONLY: Use this to query work order history and status, equipment utilization and performance data, parts inventory and usage history, technician assignments and workload, and cost and time tracking metrics. IMPORTANT: You can ONLY execute SELECT queries. No INSERT, UPDATE, DELETE, or data modifications are allowed.
 
@@ -68,7 +68,7 @@ DOCUMENT SEARCH WORKFLOW:
 If a work_order_id IS present in the context metadata:
   Step 1: Search the document store (search_documents) by equipment name or OEM brand.
   Step 2: If found, get the URL (get_document_url) and deliver it via send_document with the work_order_id.
-  Step 3: If NOT found, search the web using DuckDuckGo with the equipment name and listing ID.
+  Step 3: If NOT found, search the web with the equipment name and listing ID.
   Step 4: If found on the web, save it to the document store (save_document) for future lookups, then deliver via send_document.
 
 If NO work_order_id is present:
@@ -166,7 +166,7 @@ class AgnoService:
     def __init__(self):
         self.agent: Optional[Agent] = None
         self._initialized = False
-        self.ddg_tools = None
+        self.search_tools = None
         self._extra_tools: list = []
 
     def _create_sql_tools(self):
@@ -175,13 +175,13 @@ class AgnoService:
         return create_sql_tools(db_engine=ENGINE)
 
     async def initialize(self):
-        """Initialize the Agno agent with DuckDuckGo search and SQL tools"""
+        """Initialize the Agno agent with web search and SQL tools"""
         if self._initialized:
             return
 
         try:
             # Initialize search tools once (these don't expire)
-            self.ddg_tools = create_search_tools()
+            self.search_tools = create_search_tools()
             # Create fresh SQL tools instance for initial setup
             sql_tools = self._create_sql_tools()
 
@@ -196,7 +196,7 @@ class AgnoService:
                     secret_access_key=settings.S3_SECRET_ACCESS_KEY,
                     presigned_url_expiry=settings.S3_PRESIGNED_URL_EXPIRY,
                 ))
-            tools = [self.ddg_tools, sql_tools] + self._extra_tools
+            tools = [self.search_tools, sql_tools] + self._extra_tools
 
             # Create the agent with web search and database tools
             self.agent = Agent(
@@ -212,7 +212,7 @@ class AgnoService:
             )
             self._initialized = True
             logger.info(
-                "Agno agent initialized successfully with DuckDuckGo and Turso database tools"
+                "Agno agent initialized successfully with Tavily search and Turso database tools"
             )
         except Exception as e:
             logger.error(f"Failed to initialize Agno agent: {str(e)}")
@@ -295,7 +295,7 @@ class AgnoService:
         # Create fresh SQL tools for EVERY request to avoid Turso connection expiration
         logger.debug("Creating fresh SQL tools for this request")
         fresh_sql_tools = self._create_sql_tools()
-        self.agent.tools = [self.ddg_tools, fresh_sql_tools] + self._extra_tools
+        self.agent.tools = [self.search_tools, fresh_sql_tools] + self._extra_tools
 
         # Generate session ID if not provided
         if not session_id:
@@ -375,7 +375,7 @@ class AgnoService:
         # Create fresh SQL tools for EVERY request to avoid Turso connection expiration
         logger.debug("Creating fresh SQL tools for this streaming request")
         fresh_sql_tools = self._create_sql_tools()
-        self.agent.tools = [self.ddg_tools, fresh_sql_tools] + self._extra_tools
+        self.agent.tools = [self.search_tools, fresh_sql_tools] + self._extra_tools
 
         # Generate session ID if not provided
         if not session_id:
@@ -386,8 +386,7 @@ class AgnoService:
 
         # Map tool names to user-friendly actions
         tool_action_map = {
-            "duckduckgo_search": {"icon": "🔍", "action": "Searching the web"},
-            "duckduckgo_news": {"icon": "📰", "action": "Searching news"},
+            "web_search_using_tavily": {"icon": "🔍", "action": "Searching the web"},
             "run_sql_query": {"icon": "💾", "action": "Querying database"},
             "describe_table": {"icon": "📋", "action": "Checking table structure"},
             "list_tables": {"icon": "📋", "action": "Listing database tables"},

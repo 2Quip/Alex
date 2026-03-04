@@ -1,15 +1,20 @@
 """Web search tool for Agno agents.
 
-Wraps agno.tools.duckduckgo.DuckDuckGoTools with consistent defaults
+Wraps agno.tools.tavily.TavilyTools with consistent defaults
 so all services (chat, diagnostics, voice) share the same configuration.
 """
 
-from agno.tools.duckduckgo import DuckDuckGoTools
+from agno.tools.tavily import TavilyTools
+
+from app.config.settings import settings
 
 
-def create_search_tools() -> DuckDuckGoTools:
-    """Create a DuckDuckGo search tool with standard settings."""
-    return DuckDuckGoTools(
-        timeout=10,
-        fixed_max_results=5,
+def create_search_tools() -> TavilyTools:
+    """Create a Tavily search tool with standard settings."""
+    return TavilyTools(
+        api_key=settings.TAVILY_API_KEY,
+        search_depth="basic",
+        include_answer=True,
+        max_tokens=6000,
+        format="markdown",
     )

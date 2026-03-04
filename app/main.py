@@ -113,7 +113,7 @@ async def chat(request: ChatRequest):
     Chat with the AI agent.
 
     The agent has access to:
-    - Web search (DuckDuckGo) for current information
+    - Web search (Tavily) for current information
     - MySQL database for data queries and operations
     - Conversation history stored in MySQL
     """
@@ -139,7 +139,7 @@ async def chat_stream(request: ChatRequest):
     Stream chat responses from the AI agent.
 
     The agent has access to:
-    - Web search (DuckDuckGo) for current information
+    - Web search (Tavily) for current information
     - MySQL database for data queries and operations
     - Conversation history stored in MySQL
 

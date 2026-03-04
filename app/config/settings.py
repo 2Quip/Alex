@@ -25,6 +25,9 @@ class Settings(BaseSettings):
     CARTESIA_API_KEY: Optional[str] = None
     DEEPGRAM_API_KEY: Optional[str] = None
 
+    # Web Search
+    TAVILY_API_KEY: Optional[str] = None
+
     # Document webhook (optional - for sending documents to users during calls)
     DOCUMENT_WEBHOOK_URL: Optional[str] = None
     DOCUMENT_WEBHOOK_SECRET: Optional[str] = None

@@ -130,9 +130,9 @@ def create_sql_tools():
 def create_agno_agent() -> AgnoAgent:
     """Create and configure the Agno agent with tools for voice interaction."""
 
-    ddg_tools = create_search_tools()
+    search_tools = create_search_tools()
     sql_tools = create_sql_tools()
-    tools = [ddg_tools, sql_tools]
+    tools = [search_tools, sql_tools]
 
     if settings.DOCUMENT_WEBHOOK_URL:
         tools.append(SendDocumentTool(
