@@ -53,7 +53,14 @@ class SendDocumentTool(Toolkit):
         # All retries exhausted — raise the last exception
         raise last_exception
 
-    def send_document(self, title: str, url: str, recipient: str = "", work_order_id: str = "") -> str:
+    def send_document(
+        self,
+        title: str,
+        url: str,
+        recipient: str = "",
+        work_order_id: str = "",
+        session_id: str = "",
+    ) -> str:
         """Send a document URL to the user via webhook.
 
         Use this tool when the user asks you to send, share, or deliver a document,
@@ -65,6 +72,7 @@ class SendDocumentTool(Toolkit):
             url: Full URL to the document
             recipient: Optional recipient identifier (email, phone, or user ID)
             work_order_id: The work order ID to associate the document with
+            session_id: The current session ID
 
         Returns:
             A message confirming whether the document was sent successfully.
@@ -73,13 +81,15 @@ class SendDocumentTool(Toolkit):
             "title": title,
             "url": url,
             "recipient": recipient,
-            "work_order_id": work_order_id,
+            "workOrderId": work_order_id,
+            "sessionId": session_id,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
-        headers = {}
         if self.webhook_secret:
-            headers["Authorization"] = f"Bearer {self.webhook_secret}"
+            payload["webhookSecret"] = self.webhook_secret
+
+        headers = {}
 
         try:
             response = self._post(payload, headers)

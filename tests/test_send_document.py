@@ -46,7 +46,7 @@ def test_send_document_payload_format(tool):
     assert call_kwargs.args[0] == "https://example.com/webhook"
     assert call_kwargs.kwargs["timeout"] == 10.0
     payload = call_kwargs.kwargs["json"]
-    assert set(payload.keys()) == {"title", "url", "recipient", "work_order_id", "timestamp"}
+    assert set(payload.keys()) == {"title", "url", "recipient", "workOrderId", "sessionId", "timestamp"}
 
 
 def test_send_document_timeout(tool):
@@ -131,7 +131,7 @@ def test_tool_registers_send_document():
     assert "send_document" in func_names
 
 
-def test_auth_header_sent_when_secret_provided():
+def test_webhook_secret_in_payload_when_provided():
     tool = SendDocumentTool(webhook_url="https://example.com/webhook", webhook_secret="my-secret-key")
     mock_response = MagicMock()
     mock_response.status_code = 200
@@ -140,11 +140,11 @@ def test_auth_header_sent_when_secret_provided():
     with patch("app.tools.send_document.httpx.post", return_value=mock_response) as mock_post:
         tool.send_document(title="Doc", url="https://example.com/doc.pdf")
 
-    headers = mock_post.call_args.kwargs["headers"]
-    assert headers["Authorization"] == "Bearer my-secret-key"
+    payload = mock_post.call_args.kwargs["json"]
+    assert payload["webhookSecret"] == "my-secret-key"
 
 
-def test_no_auth_header_when_no_secret(tool):
+def test_no_webhook_secret_in_payload_when_not_provided(tool):
     mock_response = MagicMock()
     mock_response.status_code = 200
     mock_response.raise_for_status = MagicMock()
@@ -152,8 +152,8 @@ def test_no_auth_header_when_no_secret(tool):
     with patch("app.tools.send_document.httpx.post", return_value=mock_response) as mock_post:
         tool.send_document(title="Doc", url="https://example.com/doc.pdf")
 
-    headers = mock_post.call_args.kwargs["headers"]
-    assert "Authorization" not in headers
+    payload = mock_post.call_args.kwargs["json"]
+    assert "webhookSecret" not in payload
 
 
 def test_default_recipient_is_empty(tool):
