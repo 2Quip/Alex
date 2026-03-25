@@ -77,7 +77,7 @@ class SendDocumentTool(Toolkit):
         Returns:
             A message confirming whether the document was sent successfully.
         """
-        payload = {
+        inner = {
             "title": title,
             "url": url,
             "recipient": recipient,
@@ -87,7 +87,10 @@ class SendDocumentTool(Toolkit):
         }
 
         if self.webhook_secret:
-            payload["webhookSecret"] = self.webhook_secret
+            inner["webhookSecret"] = self.webhook_secret
+
+        # tRPC mutations expect the input wrapped in {"json": {...}}
+        payload = {"json": inner}
 
         headers = {}
 

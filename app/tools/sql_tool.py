@@ -44,7 +44,17 @@ class ReadOnlySQLTools(SQLTools):
         if _WRITE_RE.search(query):
             logger.warning("Blocked write query: %s", query[:200])
             return "Error: Only SELECT queries are allowed. This database is read-only."
-        return super().run_sql_query(query=query, limit=limit)
+        try:
+            return super().run_sql_query(query=query, limit=limit)
+        except Exception as e:
+            if "STREAM_EXPIRED" in str(e) or "stream" in str(e).lower():
+                logger.debug("Stale connection in run_sql_query, disposing pool and retrying")
+                try:
+                    self.db_engine.dispose()
+                except Exception:
+                    pass
+                return super().run_sql_query(query=query, limit=limit)
+            raise
 
     def run_sql(self, sql: str, limit: int | None = None) -> list[dict]:
         """Run a SELECT query only. Rejects any write statements."""

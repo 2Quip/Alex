@@ -27,11 +27,11 @@ def test_send_document_success(tool):
 
     assert "sent successfully" in result
     mock_post.assert_called_once()
-    payload = mock_post.call_args.kwargs["json"]
-    assert payload["title"] == "Kubota SVL97-2 Guide"
-    assert payload["url"] == "https://example.com/guide.pdf"
-    assert payload["recipient"] == "user1"
-    assert "timestamp" in payload
+    inner = mock_post.call_args.kwargs["json"]["json"]
+    assert inner["title"] == "Kubota SVL97-2 Guide"
+    assert inner["url"] == "https://example.com/guide.pdf"
+    assert inner["recipient"] == "user1"
+    assert "timestamp" in inner
 
 
 def test_send_document_payload_format(tool):
@@ -46,7 +46,9 @@ def test_send_document_payload_format(tool):
     assert call_kwargs.args[0] == "https://example.com/webhook"
     assert call_kwargs.kwargs["timeout"] == 10.0
     payload = call_kwargs.kwargs["json"]
-    assert set(payload.keys()) == {"title", "url", "recipient", "workOrderId", "sessionId", "timestamp"}
+    # tRPC wrapper
+    assert set(payload.keys()) == {"json"}
+    assert set(payload["json"].keys()) == {"title", "url", "recipient", "workOrderId", "sessionId", "timestamp"}
 
 
 def test_send_document_timeout(tool):
@@ -140,8 +142,8 @@ def test_webhook_secret_in_payload_when_provided():
     with patch("app.tools.send_document.httpx.post", return_value=mock_response) as mock_post:
         tool.send_document(title="Doc", url="https://example.com/doc.pdf")
 
-    payload = mock_post.call_args.kwargs["json"]
-    assert payload["webhookSecret"] == "my-secret-key"
+    inner = mock_post.call_args.kwargs["json"]["json"]
+    assert inner["webhookSecret"] == "my-secret-key"
 
 
 def test_no_webhook_secret_in_payload_when_not_provided(tool):
@@ -152,8 +154,8 @@ def test_no_webhook_secret_in_payload_when_not_provided(tool):
     with patch("app.tools.send_document.httpx.post", return_value=mock_response) as mock_post:
         tool.send_document(title="Doc", url="https://example.com/doc.pdf")
 
-    payload = mock_post.call_args.kwargs["json"]
-    assert "webhookSecret" not in payload
+    inner = mock_post.call_args.kwargs["json"]["json"]
+    assert "webhookSecret" not in inner
 
 
 def test_default_recipient_is_empty(tool):
@@ -164,5 +166,5 @@ def test_default_recipient_is_empty(tool):
     with patch("app.tools.send_document.httpx.post", return_value=mock_response) as mock_post:
         tool.send_document(title="Doc", url="https://example.com/doc.pdf")
 
-    payload = mock_post.call_args.kwargs["json"]
-    assert payload["recipient"] == ""
+    inner = mock_post.call_args.kwargs["json"]["json"]
+    assert inner["recipient"] == ""
