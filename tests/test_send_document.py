@@ -158,6 +158,30 @@ def test_no_webhook_secret_in_payload_when_not_provided(tool):
     assert "webhookSecret" not in inner
 
 
+def test_target_included_when_provided(tool):
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.raise_for_status = MagicMock()
+
+    with patch("app.tools.send_document.httpx.post", return_value=mock_response) as mock_post:
+        tool.send_document(title="PM Guide", url="https://example.com/pm.pdf", target="preventive-maintenance")
+
+    inner = mock_post.call_args.kwargs["json"]["json"]
+    assert inner["target"] == "preventive-maintenance"
+
+
+def test_target_omitted_when_empty(tool):
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.raise_for_status = MagicMock()
+
+    with patch("app.tools.send_document.httpx.post", return_value=mock_response) as mock_post:
+        tool.send_document(title="Doc", url="https://example.com/doc.pdf")
+
+    inner = mock_post.call_args.kwargs["json"]["json"]
+    assert "target" not in inner
+
+
 def test_default_recipient_is_empty(tool):
     mock_response = MagicMock()
     mock_response.status_code = 200

@@ -16,6 +16,7 @@ setup_logging(log_level=settings.LOG_LEVEL, log_file=settings.LOG_FILE, log_form
 from app.core.formatting import md_to_html  # noqa: E402
 from app.services.agno_service import agno_service  # noqa: E402
 from app.services.diagnostics_service import diagnostics_service  # noqa: E402
+from app.services.pm_schedule_service import pm_schedule_service  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +49,15 @@ class DiagnosticsResponse(BaseModel):
     execution_time: float
 
 
+class PMScheduleRequest(BaseModel):
+    s3_key: str
+
+
+class PMScheduleResponse(BaseModel):
+    schedule: list[dict[str, str]]
+    s3_key: str
+
+
 class TokenRequest(BaseModel):
     identity: str
     room: str
@@ -67,7 +77,8 @@ async def lifespan(app: FastAPI):
     logger.info("Starting up Agno Agent API...")
     await agno_service.initialize()
     await diagnostics_service.initialize()
-    logger.info("Agno Agent and Diagnostics services initialized successfully")
+    await pm_schedule_service.initialize()
+    logger.info("Agno Agent, Diagnostics, and PM Schedule services initialized successfully")
 
     yield
 
@@ -75,6 +86,7 @@ async def lifespan(app: FastAPI):
     logger.info("Shutting down Agno Agent API...")
     await agno_service.cleanup()
     await diagnostics_service.cleanup()
+    await pm_schedule_service.cleanup()
     logger.info("Cleanup complete")
 
 
@@ -194,6 +206,25 @@ async def diagnostics(request: DiagnosticsRequest):
         )
     except Exception as e:
         logger.error(f"Diagnostics error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/pm-schedule", response_model=PMScheduleResponse)
+async def pm_schedule(request: PMScheduleRequest):
+    """Extract preventive maintenance schedule data from a PDF stored in S3.
+
+    Downloads the PDF, extracts tables/text, and uses an LLM to return
+    structured PM schedule rows as a JSON array.
+    """
+    try:
+        rows = await pm_schedule_service.extract_schedule(s3_key=request.s3_key)
+        return PMScheduleResponse(schedule=rows, s3_key=request.s3_key)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail=f"Document not found: {request.s3_key}")
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    except Exception as e:
+        logger.error(f"PM schedule extraction error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

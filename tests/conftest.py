@@ -82,11 +82,15 @@ async def client():
     from app.services.diagnostics_service import diagnostics_service
     from app.main import app
 
+    from app.services.pm_schedule_service import pm_schedule_service
+
     with (
         patch.object(agno_service, "initialize", new_callable=AsyncMock),
         patch.object(agno_service, "cleanup", new_callable=AsyncMock),
         patch.object(diagnostics_service, "initialize", new_callable=AsyncMock),
         patch.object(diagnostics_service, "cleanup", new_callable=AsyncMock),
+        patch.object(pm_schedule_service, "initialize", new_callable=AsyncMock),
+        patch.object(pm_schedule_service, "cleanup", new_callable=AsyncMock),
     ):
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(

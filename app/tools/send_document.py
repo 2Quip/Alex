@@ -60,12 +60,14 @@ class SendDocumentTool(Toolkit):
         recipient: str = "",
         work_order_id: str = "",
         session_id: str = "",
+        target: str = "",
     ) -> str:
         """Send a document URL to the user via webhook.
 
         Use this tool when the user asks you to send, share, or deliver a document,
         PDF, manual, repair guide, or any file link. Only send documents when the user
         is on a work order page. Include the work_order_id from CURRENT CONTEXT.
+        For preventive maintenance documents, set target to "preventive-maintenance".
 
         Args:
             title: Document title (e.g., "Kubota SVL97-2 Repair Guide")
@@ -73,6 +75,7 @@ class SendDocumentTool(Toolkit):
             recipient: Optional recipient identifier (email, phone, or user ID)
             work_order_id: The work order ID to associate the document with
             session_id: The current session ID
+            target: Document routing target (e.g., "preventive-maintenance")
 
         Returns:
             A message confirming whether the document was sent successfully.
@@ -85,6 +88,9 @@ class SendDocumentTool(Toolkit):
             "sessionId": session_id,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
+
+        if target:
+            inner["target"] = target
 
         if self.webhook_secret:
             inner["webhookSecret"] = self.webhook_secret

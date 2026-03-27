@@ -133,6 +133,75 @@ async def test_diagnostics_service_error(client):
     assert resp.status_code == 500
 
 
+# --- PM Schedule tests ---
+
+
+@pytest.mark.asyncio
+async def test_pm_schedule(client):
+    mock_rows = [
+        {"Service Hours": "250", "Task": "Oil change"},
+        {"Service Hours": "500", "Task": "Filter replace"},
+    ]
+    with patch(
+        "app.main.pm_schedule_service.extract_schedule",
+        new_callable=AsyncMock,
+        return_value=mock_rows,
+    ):
+        resp = await client.post(
+            "/pm-schedule", json={"s3_key": "manuals/test.pdf"}
+        )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data["schedule"]) == 2
+    assert data["s3_key"] == "manuals/test.pdf"
+    assert data["schedule"][0]["Task"] == "Oil change"
+
+
+@pytest.mark.asyncio
+async def test_pm_schedule_not_found(client):
+    with patch(
+        "app.main.pm_schedule_service.extract_schedule",
+        new_callable=AsyncMock,
+        side_effect=FileNotFoundError("not found"),
+    ):
+        resp = await client.post(
+            "/pm-schedule", json={"s3_key": "missing.pdf"}
+        )
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_pm_schedule_invalid_pdf(client):
+    with patch(
+        "app.main.pm_schedule_service.extract_schedule",
+        new_callable=AsyncMock,
+        side_effect=ValueError("scanned image"),
+    ):
+        resp = await client.post(
+            "/pm-schedule", json={"s3_key": "scan.pdf"}
+        )
+    assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_pm_schedule_service_error(client):
+    with patch(
+        "app.main.pm_schedule_service.extract_schedule",
+        new_callable=AsyncMock,
+        side_effect=RuntimeError("S3 down"),
+    ):
+        resp = await client.post(
+            "/pm-schedule", json={"s3_key": "test.pdf"}
+        )
+    assert resp.status_code == 500
+
+
+@pytest.mark.asyncio
+async def test_pm_schedule_missing_key(client):
+    resp = await client.post("/pm-schedule", json={})
+    assert resp.status_code == 422
+
+
 # --- LiveKit Token tests ---
 
 
